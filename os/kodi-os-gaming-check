@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT=/storage
+OUT=/run/kodi-os/gaming
+mkdir -p /run/kodi-os
+
+check_cmd() {
+  command -v "$1" >/dev/null 2>&1 && printf '%s=installed\n' "$1" || printf '%s=missing\n' "$1"
+}
+
+{
+  printf 'status=ready\n'
+  check_cmd retroarch
+  check_cmd pcsx2
+  check_cmd wine
+  check_cmd gamemoderun
+  for d in roms bios saves; do
+    if [[ -d "$ROOT/$d" && -w "$ROOT/$d" ]]; then
+      printf 'storage_%s=ready\n' "$d"
+    else
+      printf 'storage_%s=unavailable\n' "$d"
+    fi
+  done
+  for system in arcade nes snes gb gba megadrive n64 ps1 ps2 psp dreamcast gamecube wii pc; do
+    dir="$ROOT/roms/$system"
+    count=0
+    [[ -d "$dir" ]] && count=$(find "$dir" -maxdepth 1 -type f 2>/dev/null | wc -l)
+    printf 'roms_%s=%s\n' "$system" "$count"
+  done
+} > "$OUT.tmp"
+mv -f "$OUT.tmp" "$OUT"
+chmod 0644 "$OUT"
