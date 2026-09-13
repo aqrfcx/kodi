@@ -1,0 +1,12 @@
+[Unit]
+Description=Kodi OS gaming storage initialization
+After=local-fs.target
+Before=kodi-os-session.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/kodi-os-gaming-init
+RemainAfterExit=yes
+
+[Install]
+WantedBy=kodi-os.target
