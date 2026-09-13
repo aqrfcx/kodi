@@ -1,24 +1,31 @@
 [Unit]
 Description=Kodi OS graphical session
-After=graphical.target NetworkManager.service pipewire.service
-Wants=NetworkManager.service pipewire.service
+Wants=NetworkManager.service bluetooth.service upower.service
+After=NetworkManager.service bluetooth.service upower.service kodi-os-firstboot.service systemd-user-sessions.service
+Requires=kodi-os-firstboot.service
 Conflicts=getty@tty1.service
 
 [Service]
 Type=simple
 User=kodi
 Group=kodi
+SupplementaryGroups=audio video render input netdev
+PAMName=login
 Environment=HOME=/home/kodi
 Environment=XDG_CONFIG_HOME=/home/kodi/.config
 Environment=XDG_DATA_HOME=/home/kodi/.local/share
 Environment=XDG_CACHE_HOME=/home/kodi/.cache
-ExecStart=/usr/bin/startx /usr/bin/kodi -- :0 vt1 -nolisten tcp
+Environment=LIBSEAT_BACKEND=logind
+ExecStart=/usr/bin/startx /usr/bin/kodi -- :0 vt1 -nolisten tcp -nocursor
 Restart=on-failure
 RestartSec=2
 TTYPath=/dev/tty1
 TTYReset=yes
 TTYVHangup=yes
 TTYVTDisallocate=yes
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=graphical.target
