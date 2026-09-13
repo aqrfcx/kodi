@@ -1,0 +1,12 @@
+[General]
+Name=Kodi OS
+ShortName=Kodi OS
+Version=1.0
+ProductUrl=https://kodi.tv/
+
+[Branding]
+ShowSupportUrl=false
+ShowReleaseNotesUrl=false
+
+[Images]
+ProductLogo=logo.png
