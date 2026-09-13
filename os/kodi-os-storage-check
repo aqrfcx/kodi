@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+STATE=/run/kodi-os/storage
+mkdir -p /run/kodi-os
+status=ok
+reason=none
+
+if [[ ! -d /storage ]]; then
+  status=degraded
+  reason=missing-storage
+elif [[ ! -d /storage/userdata/.kodi ]]; then
+  status=degraded
+  reason=missing-kodi-userdata
+elif [[ -L /home/kodi/.kodi && ! -e /home/kodi/.kodi ]]; then
+  status=degraded
+  reason=broken-kodi-link
+fi
+
+printf 'status=%s\nreason=%s\n' "$status" "$reason" > "$STATE"
+chmod 0644 "$STATE"
+exit 0
