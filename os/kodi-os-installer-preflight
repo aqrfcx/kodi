@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+OUT=/run/kodi-os/installer-preflight
+mkdir -p /run/kodi-os
+
+failures=()
+warn=()
+
+need() {
+  command -v "$1" >/dev/null 2>&1 || failures+=("missing:$1")
+}
+
+for cmd in lsblk blkid findmnt mountpoint efibootmgr; do need "$cmd"; done
+
+dpkg-query -W calamares >/dev/null 2>&1 || failures+=("missing-package:calamares")
+dpkg-query -W grub-efi-amd64 >/dev/null 2>&1 || failures+=("missing-package:grub-efi-amd64")
+dpkg-query -W shim-signed >/dev/null 2>&1 || failures+=("missing-package:shim-signed")
+
+firmware=bios
+[[ -d /sys/firmware/efi ]] && firmware=uefi
+
+root_source="$(findmnt -n -o SOURCE / 2>/dev/null || true)"
+root_fstype="$(findmnt -n -o FSTYPE / 2>/dev/null || true)"
+
+if [[ "$firmware" == uefi ]]; then
+  if ! efibootmgr -v >/dev/null 2>&1; then
+    warn+=("efi-nvram-unavailable")
+  fi
+fi
+
+if [[ ! -d /storage ]]; then warn+=("storage-directory-missing") ; fi
+
+status=ok
+((${#failures[@]})) && status=failed
+((${#warn[@]})) && [[ "$status" == ok ]] && status=warning
+
+{
+  printf 'status=%s\n' "$status"
+  printf 'firmware=%s\n' "$firmware"
+  printf 'root_source=%s\n' "$root_source"
+  printf 'root_fstype=%s\n' "$root_fstype"
+  printf 'failures=%s\n' "${failures[*]:-none}"
+  printf 'warnings=%s\n' "${warn[*]:-none}"
+  printf '\nblock_devices:\n'
+  lsblk -e7 -o NAME,TYPE,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINTS 2>/dev/null || true
+} > "$OUT"
+
+chmod 0644 "$OUT"
+[[ "$status" != failed ]]
