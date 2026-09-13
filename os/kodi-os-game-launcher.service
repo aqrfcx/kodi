@@ -1,0 +1,7 @@
+[Unit]
+Description=Kodi OS game launcher runtime
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/kodi-os-game-launcher
+RemainAfterExit=yes
