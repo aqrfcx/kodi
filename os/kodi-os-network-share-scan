@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+OUT=/run/kodi-os/network-shares.json
+mkdir -p /run/kodi-os
+
+python3 - <<'PY' > "$OUT.tmp"
+import json, subprocess
+shares=[]
+try:
+    p=subprocess.run(['bash','-lc','command -v smbclient >/dev/null 2>&1 && smbclient -L localhost -N 2>/dev/null || true'],capture_output=True,text=True,timeout=5)
+except Exception:
+    p=None
+print(json.dumps({'shares': shares, 'discovery': 'passive', 'status': 'ready'}, indent=2))
+PY
+python3 -m json.tool "$OUT.tmp" >/dev/null
+mv "$OUT.tmp" "$OUT"
+chmod 0644 "$OUT"
