@@ -50,6 +50,7 @@ cp "$OS_DIR/kodi-os-firstboot.service" config/includes.chroot/etc/systemd/system
 cp "$OS_DIR/kodi-os-recovery.service" config/includes.chroot/etc/systemd/system/
 cp "$OS_DIR/kodi-os-gaming-init.service" config/includes.chroot/etc/systemd/system/
 cp "$OS_DIR/kodi-os-controller-init.service" config/includes.chroot/etc/systemd/system/
+cp "$OS_DIR/kodi-os-network-init.service" config/includes.chroot/etc/systemd/system/
 cp "$OS_DIR/systemd/kodi-os.target" config/includes.chroot/etc/systemd/system/
 cp "$OS_DIR/firstboot.sh" config/includes.chroot/usr/sbin/kodi-os-firstboot
 cp "$OS_DIR/kodi-os-hardware.sh" config/includes.chroot/usr/sbin/kodi-os-hardware
@@ -58,6 +59,7 @@ cp "$OS_DIR/kodi-os-recovery" config/includes.chroot/usr/sbin/kodi-os-recovery
 cp "$OS_DIR/kodi-os-storage-init" config/includes.chroot/usr/sbin/kodi-os-storage-init
 cp "$OS_DIR/kodi-os-gaming-init" config/includes.chroot/usr/sbin/kodi-os-gaming-init
 cp "$OS_DIR/kodi-os-controller-init" config/includes.chroot/usr/sbin/kodi-os-controller-init
+cp "$OS_DIR/kodi-os-network-init" config/includes.chroot/usr/sbin/kodi-os-network-init
 cp "$OS_DIR/includes.chroot/etc/default/grub.d/99-kodi-os.cfg" config/includes.chroot/etc/default/grub.d/99-kodi-os.cfg
 cp "$OS_DIR/configure-services.sh" config/hooks/live/0200-enable-kodi-os.hook.chroot
 cp "$OS_DIR/hooks/0300-validate-kodi-os.hook.chroot" config/hooks/live/0300-validate-kodi-os.hook.chroot
@@ -70,6 +72,7 @@ chmod +x config/includes.chroot/usr/sbin/kodi-os-firstboot \
   config/includes.chroot/usr/sbin/kodi-os-storage-init \
   config/includes.chroot/usr/sbin/kodi-os-gaming-init \
   config/includes.chroot/usr/sbin/kodi-os-controller-init \
+  config/includes.chroot/usr/sbin/kodi-os-network-init \
   config/hooks/live/0200-enable-kodi-os.hook.chroot \
   config/hooks/live/0300-validate-kodi-os.hook.chroot \
   config/hooks/live/0310-validate-boot-assets.hook.chroot \
