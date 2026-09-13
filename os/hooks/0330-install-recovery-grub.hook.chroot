@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+install -d -m 0755 /etc/grub.d
+install -m 0755 /opt/kodi-os/kodi-os-recovery-grub.cfg /etc/grub.d/09_kodi_os_recovery
+
+echo "Kodi OS recovery GRUB entry installed"
