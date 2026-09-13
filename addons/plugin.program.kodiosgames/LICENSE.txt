@@ -1,0 +1,7 @@
+Kodi OS Games
+Copyright (C) Kodi OS Project
+
+SPDX-License-Identifier: GPL-2.0-or-later
+
+This add-on is distributed under the terms of the GNU General Public License,
+version 2 or later. See the project license for the complete terms.
