@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+fail() { echo "Kodi OS boot validation failed: $*" >&2; exit 1; }
+
+# Ensure the image contains the firmware/boot packages required by the ISO
+# builder's hybrid UEFI/BIOS target.
+dpkg-query -W grub-efi-amd64 >/dev/null 2>&1 || fail "grub-efi-amd64 is not installed"
+dpkg-query -W linux-image-amd64 >/dev/null 2>&1 || fail "linux-image-amd64 is not installed"
+
+# Verify the installer executable exists when Calamares is part of the image.
+if dpkg-query -W calamares >/dev/null 2>&1; then
+  command -v calamares >/dev/null 2>&1 || fail "Calamares package is installed but executable is missing"
+fi
+
+# Verify basic persistent-storage tooling is available for an installed system.
+for cmd in lsblk blkid mount umount; do
+  command -v "$cmd" >/dev/null 2>&1 || fail "storage tool missing: $cmd"
+done
+
+echo "Kodi OS boot/install validation: PASS"
