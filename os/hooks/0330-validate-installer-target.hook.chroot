@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+fail() { echo "Kodi OS installer validation failed: $*" >&2; exit 1; }
+
+for cmd in lsblk blkid findmnt mountpoint efibootmgr; do
+  command -v "$cmd" >/dev/null 2>&1 || fail "missing command: $cmd"
+done
+
+dpkg-query -W calamares >/dev/null 2>&1 || fail "calamares missing"
+dpkg-query -W grub-efi-amd64 >/dev/null 2>&1 || fail "EFI bootloader missing"
+dpkg-query -W shim-signed >/dev/null 2>&1 || fail "shim-signed missing"
+
+install -d -m 0755 /boot/efi /storage
+
+# This is intentionally a non-destructive preflight. Disk selection, partition
+# creation, formatting, and bootloader installation remain explicit Calamares
+# operations and are never performed by a live-build hook.
+lsblk -e7 -o NAME,TYPE,SIZE,FSTYPE,FSVER,LABEL,UUID,MOUNTPOINTS > /var/log/kodi-os-installer-storage.txt 2>/dev/null || true
+
+if [[ -d /sys/firmware/efi ]]; then
+  printf '%s\n' 'firmware=uefi' > /etc/kodi-os-installer.conf
+else
+  printf '%s\n' 'firmware=bios-or-legacy' > /etc/kodi-os-installer.conf
+fi
+
+echo "Kodi OS installer prerequisite validation: PASS"
