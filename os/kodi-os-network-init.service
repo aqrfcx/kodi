@@ -1,0 +1,13 @@
+[Unit]
+Description=Kodi OS network readiness
+After=NetworkManager.service
+Wants=NetworkManager.service
+Before=kodi-os-session.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/kodi-os-network-init
+RemainAfterExit=yes
+
+[Install]
+WantedBy=kodi-os.target
