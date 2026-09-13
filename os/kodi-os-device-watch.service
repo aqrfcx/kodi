@@ -1,0 +1,13 @@
+[Unit]
+Description=Kodi OS input and USB device watcher
+After=systemd-udev-settle.service bluetooth.service
+Wants=bluetooth.service
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/kodi-os-device-watch
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
