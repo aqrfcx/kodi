@@ -1,0 +1,13 @@
+[Unit]
+Description=Kodi OS network state watcher
+After=NetworkManager.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/kodi-os-network-watch
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
