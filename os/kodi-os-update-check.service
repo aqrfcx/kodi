@@ -1,0 +1,8 @@
+[Unit]
+Description=Kodi OS update metadata check
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/kodi-os-update-check
