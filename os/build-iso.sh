@@ -53,6 +53,16 @@ chmod +x config/includes.chroot/usr/sbin/kodi-os-firstboot \
   config/includes.chroot/usr/sbin/kodi-os-hardware \
   config/hooks/live/0200-enable-kodi-os.hook.chroot
 
+# Install the graphical installer into the image and expose a controlled launcher.
+if [[ -f "$OS_DIR/calamares/settings.conf" ]]; then
+  mkdir -p config/includes.chroot/etc/calamares
+  cp "$OS_DIR/calamares/settings.conf" config/includes.chroot/etc/calamares/settings.conf
+fi
+if [[ -f "$OS_DIR/hooks/0400-install-calamares.hook.chroot" ]]; then
+  cp "$OS_DIR/hooks/0400-install-calamares.hook.chroot" config/hooks/live/0400-install-calamares.hook.chroot
+  chmod +x config/hooks/live/0400-install-calamares.hook.chroot
+fi
+
 if [[ "$KODI_SOURCE_BUILD" == "1" ]]; then
   mkdir -p config/includes.chroot/usr/src
   tar -C "$ROOT_DIR" --exclude=.git --exclude=build -czf config/includes.chroot/usr/src/kodi-source.tar.gz .
