@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT=/storage/roms
+OUT=/run/kodi-os/games.json
+mkdir -p /run/kodi-os
+
+json_escape() { python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().rstrip("\n")))'; }
+
+{
+  printf '{"generated":'
+  date +%s
+  printf ',"games":['
+  first=1
+  if [[ -d "$ROOT" ]]; then
+    while IFS= read -r -d '' file; do
+      rel="${file#"$ROOT"/}"
+      platform="${rel%%/*}"
+      name="$(basename "$file")"
+      if [[ "$first" -eq 0 ]]; then printf ','; fi
+      first=0
+      printf '{"platform":'; printf '%s' "$platform" | json_escape
+      printf ',"name":'; printf '%s' "$name" | json_escape
+      printf ',"path":'; printf '%s' "$file" | json_escape
+      printf '}'
+    done < <(find "$ROOT" -type f \( -iname '*.iso' -o -iname '*.chd' -o -iname '*.cue' -o -iname '*.bin' -o -iname '*.rom' -o -iname '*.nes' -o -iname '*.sfc' -o -iname '*.smc' -o -iname '*.gba' -o -iname '*.gb' -o -iname '*.gbc' -o -iname '*.n64' -o -iname '*.z64' -o -iname '*.md' -o -iname '*.gen' -o -iname '*.cdi' -o -iname '*.gdi' -o -iname '*.zip' -o -iname '*.exe' \) -print0 | sort -z)
+  fi
+  printf ']}\n'
+} > "$OUT.tmp"
+python3 -m json.tool "$OUT.tmp" >/dev/null
+mv -f "$OUT.tmp" "$OUT"
+chmod 0644 "$OUT"
