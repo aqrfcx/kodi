@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addon id="plugin.program.kodiosgames" name="Kodi OS Games" version="0.1.0" provider-name="Kodi OS Project">
+  <requires>
+    <import addon="xbmc.python" version="3.0.0" />
+  </requires>
+  <extension point="xbmc.python.pluginsource" library="addon.py">
+    <provides>executable</provides>
+  </extension>
+  <extension point="xbmc.addon.metadata">
+    <summary lang="en_GB">Kodi OS game library and launcher</summary>
+    <description lang="en_GB">Provides a Kodi-native view of games stored under /storage/roms and launches them through the Kodi OS runtime.</description>
+    <platform>linux</platform>
+    <license>GPL-2.0-or-later</license>
+  </extension>
+</addon>
