@@ -16,6 +16,7 @@ if [[ "${EUID}" -ne 0 ]]; then
   exit 1
 fi
 command -v lb >/dev/null || { echo "live-build is required" >&2; exit 1; }
+command -v sha256sum >/dev/null || { echo "sha256sum is required" >&2; exit 1; }
 
 mkdir -p "$ARTIFACT_DIR"
 rm -rf "$WORK_DIR"
@@ -46,8 +47,11 @@ cp "$OS_DIR/package-lists/kodi-os.list.chroot" config/package-lists/
 cp "$OS_DIR/kodi-os-session.service" config/includes.chroot/etc/systemd/system/
 cp "$OS_DIR/kodi-os-firstboot.service" config/includes.chroot/etc/systemd/system/
 cp "$OS_DIR/firstboot.sh" config/includes.chroot/usr/sbin/kodi-os-firstboot
+cp "$OS_DIR/kodi-os-hardware.sh" config/includes.chroot/usr/sbin/kodi-os-hardware
 cp "$OS_DIR/configure-services.sh" config/hooks/live/0200-enable-kodi-os.hook.chroot
-chmod +x config/includes.chroot/usr/sbin/kodi-os-firstboot config/hooks/live/0200-enable-kodi-os.hook.chroot
+chmod +x config/includes.chroot/usr/sbin/kodi-os-firstboot \
+  config/includes.chroot/usr/sbin/kodi-os-hardware \
+  config/hooks/live/0200-enable-kodi-os.hook.chroot
 
 if [[ "$KODI_SOURCE_BUILD" == "1" ]]; then
   mkdir -p config/includes.chroot/usr/src
@@ -63,7 +67,9 @@ if [[ -z "$ISO" ]]; then
   echo "live-build completed without producing an ISO" >&2
   exit 2
 fi
+
 cp "$ISO" "$ARTIFACT_DIR/${IMAGE_NAME}.iso"
 sha256sum "$ARTIFACT_DIR/${IMAGE_NAME}.iso" > "$ARTIFACT_DIR/${IMAGE_NAME}.iso.sha256"
+
 echo "ISO: $ARTIFACT_DIR/${IMAGE_NAME}.iso"
 echo "SHA256: $ARTIFACT_DIR/${IMAGE_NAME}.iso.sha256"
