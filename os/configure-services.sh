@@ -8,6 +8,7 @@ for service in \
   kodi-os-gaming-init.service \
   kodi-os-gaming-check.service \
   kodi-os-game-catalog.service \
+  kodi-os-storage-watch.service \
   kodi-os-controller-init.service \
   kodi-os-device-watch.service \
   kodi-os-network-init.service \
@@ -26,3 +27,4 @@ for service in NetworkManager.service upower.service bluetooth.service dbus.serv
 done
 
 chmod 0755 /usr/sbin/kodi-os-update
+chmod 0755 /usr/sbin/kodi-os-storage-watch
