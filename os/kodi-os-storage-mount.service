@@ -1,0 +1,9 @@
+[Unit]
+Description=Kodi OS removable storage automount
+After=udisks2.service kodi-os-storage-init.service
+Wants=kodi-os-storage-init.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/kodi-os-storage-mount
+RemainAfterExit=no
