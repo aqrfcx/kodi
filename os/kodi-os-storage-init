@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+STORAGE=/storage
+install -d -m 0755 "$STORAGE" "$STORAGE/userdata" "$STORAGE/media" "$STORAGE/state" "$STORAGE/roms" "$STORAGE/downloads" "$STORAGE/saves" "$STORAGE/screenshots"
+
+# Keep media/game data separated from the operating system. This is safe for
+# both a fresh installation and an existing installation because it only
+# creates missing directories.
+for dir in userdata media state roms downloads saves screenshots; do
+  install -d -m 0755 "$STORAGE/$dir"
+done
+
+if id kodi >/dev/null 2>&1; then
+  chown -R kodi:kodi "$STORAGE"
+fi
+
+# Kodi's userdata is persistent across OS upgrades/reboots.
+if [[ ! -e /home/kodi/.kodi ]]; then
+  ln -s "$STORAGE/userdata/.kodi" /home/kodi/.kodi
+fi
+install -d -m 0755 "$STORAGE/userdata/.kodi"
+if id kodi >/dev/null 2>&1; then
+  chown -h kodi:kodi /home/kodi/.kodi
+  chown -R kodi:kodi "$STORAGE/userdata/.kodi"
+fi
