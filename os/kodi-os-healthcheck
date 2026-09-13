@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+OUT=/run/kodi-os/health
+mkdir -p /run/kodi-os
+
+status=ok
+issues=()
+
+for cmd in systemctl udevadm lsblk findmnt; do
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    status=degraded
+    issues+=("missing:$cmd")
+  fi
+done
+
+if [[ ! -d /storage ]]; then
+  status=degraded
+  issues+=("storage-missing")
+fi
+
+if command -v findmnt >/dev/null 2>&1 && ! findmnt -rn / >/dev/null 2>&1; then
+  status=degraded
+  issues+=("root-not-mounted")
+fi
+
+if command -v lsblk >/dev/null 2>&1; then
+  lsblk -dn -o NAME,TYPE,SIZE > /run/kodi-os/block-devices 2>/dev/null || true
+fi
+
+{
+  printf 'status=%s\n' "$status"
+  printf 'issues=%s\n' "${issues[*]:-none}"
+  printf 'kernel=%s\n' "$(uname -r)"
+  printf 'arch=%s\n' "$(uname -m)"
+} > "$OUT"
+chmod 0644 "$OUT"
+
+[[ "$status" == ok ]] || exit 0
