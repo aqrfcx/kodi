@@ -1,0 +1,20 @@
+[Unit]
+Description=Kodi OS recovery environment
+After=local-fs.target
+ConditionPathExists=/storage/.kodi-os-recovery
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/kodi-os-recovery
+Restart=on-failure
+RestartSec=2
+StandardInput=tty
+StandardOutput=journal+console
+StandardError=journal+console
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+
+[Install]
+WantedBy=kodi-os.target
