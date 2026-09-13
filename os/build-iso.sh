@@ -15,14 +15,13 @@ if [[ "${EUID}" -ne 0 ]]; then
   echo "Run as root: sudo $0" >&2
   exit 1
 fi
-
 command -v lb >/dev/null || { echo "live-build is required" >&2; exit 1; }
+
 mkdir -p "$ARTIFACT_DIR"
 rm -rf "$WORK_DIR"
 mkdir -p "$WORK_DIR"
 cd "$WORK_DIR"
 
-export LB_BOOTSTRAP_INCLUDE=""
 lb config \
   --mode debian \
   --distribution "$CODENAME" \
@@ -37,14 +36,18 @@ lb config \
   --iso-publisher "Kodi OS Project" \
   --iso-volume "KODI_OS"
 
-mkdir -p config/package-lists config/includes.chroot/etc/systemd/system config/includes.chroot/etc/kodi-os
+mkdir -p config/package-lists \
+  config/includes.chroot/etc/systemd/system \
+  config/includes.chroot/etc/kodi-os \
+  config/includes.chroot/usr/sbin \
+  config/hooks/live
+
 cp "$OS_DIR/package-lists/kodi-os.list.chroot" config/package-lists/
 cp "$OS_DIR/kodi-os-session.service" config/includes.chroot/etc/systemd/system/
 cp "$OS_DIR/kodi-os-firstboot.service" config/includes.chroot/etc/systemd/system/
-cp "$OS_DIR/firstboot.sh" config/includes.chroot/usr/sbin/kodi-os-firstboot 2>/dev/null || true
-mkdir -p config/includes.chroot/usr/sbin
 cp "$OS_DIR/firstboot.sh" config/includes.chroot/usr/sbin/kodi-os-firstboot
-chmod +x config/includes.chroot/usr/sbin/kodi-os-firstboot
+cp "$OS_DIR/configure-services.sh" config/hooks/live/0200-enable-kodi-os.hook.chroot
+chmod +x config/includes.chroot/usr/sbin/kodi-os-firstboot config/hooks/live/0200-enable-kodi-os.hook.chroot
 
 if [[ "$KODI_SOURCE_BUILD" == "1" ]]; then
   mkdir -p config/includes.chroot/usr/src
@@ -55,7 +58,7 @@ fi
 
 lb build 2>&1 | tee "$ROOT_DIR/build/kodi-os-build.log"
 
-ISO="$(find . -maxdepth 1 -type f -name '*.hybrid.iso' -o -name '*.iso' | head -n1)"
+ISO="$(find . -maxdepth 1 -type f \( -name '*.hybrid.iso' -o -name '*.iso' \) -print -quit)"
 if [[ -z "$ISO" ]]; then
   echo "live-build completed without producing an ISO" >&2
   exit 2
