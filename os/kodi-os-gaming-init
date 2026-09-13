@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT=/storage
+ROM_ROOT="$ROOT/roms"
+SAVE_ROOT="$ROOT/saves"
+BIOS_ROOT="$ROOT/bios"
+
+for d in "$ROM_ROOT" "$SAVE_ROOT" "$BIOS_ROOT" \
+  "$ROM_ROOT/arcade" "$ROM_ROOT/nes" "$ROM_ROOT/snes" "$ROM_ROOT/gb" \
+  "$ROM_ROOT/gba" "$ROM_ROOT/megadrive" "$ROM_ROOT/n64" "$ROM_ROOT/ps1" \
+  "$ROM_ROOT/ps2" "$ROM_ROOT/psp" "$ROM_ROOT/dreamcast" "$ROM_ROOT/gamecube" \
+  "$ROM_ROOT/wii" "$ROM_ROOT/pc" "$SAVE_ROOT/retroarch" "$SAVE_ROOT/pcsx2"; do
+  install -d -m 0755 "$d"
+done
+
+cat > "$ROOT/roms/README.txt" <<'EOF'
+Kodi OS game storage
+
+Put legally owned game files in the matching system directory.
+BIOS files belong in /storage/bios or the emulator-specific BIOS directory.
+Kodi/RetroArch/PCSX2 configurations and saves are kept outside the read-only OS.
+EOF
+
+if id kodi >/dev/null 2>&1; then
+  chown -R kodi:kodi "$ROOT"
+fi
