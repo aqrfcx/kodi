@@ -13,3 +13,5 @@ systemctl enable kodi-os.target
 for service in NetworkManager.service upower.service bluetooth.service; do
   systemctl enable "$service" 2>/dev/null || true
 done
+
+install -m 0755 /usr/sbin/kodi-os-update /usr/sbin/kodi-os-update
