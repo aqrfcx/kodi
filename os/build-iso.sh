@@ -39,7 +39,6 @@ lb config \
 
 mkdir -p config/package-lists \
   config/includes.chroot/etc/systemd/system \
-  config/includes.chroot/etc/calamares \
   config/includes.chroot/etc/default/grub.d \
   config/includes.chroot/etc/calamares \
   config/includes.chroot/usr/sbin \
@@ -58,13 +57,15 @@ cp "$OS_DIR/includes.chroot/etc/default/grub.d/99-kodi-os.cfg" config/includes.c
 cp "$OS_DIR/configure-services.sh" config/hooks/live/0200-enable-kodi-os.hook.chroot
 cp "$OS_DIR/hooks/0300-validate-kodi-os.hook.chroot" config/hooks/live/0300-validate-kodi-os.hook.chroot
 cp "$OS_DIR/hooks/0310-validate-boot-assets.hook.chroot" config/hooks/live/0310-validate-boot-assets.hook.chroot
+cp "$OS_DIR/hooks/0320-validate-efi-layout.hook.chroot" config/hooks/live/0320-validate-efi-layout.hook.chroot
 chmod +x config/includes.chroot/usr/sbin/kodi-os-firstboot \
   config/includes.chroot/usr/sbin/kodi-os-hardware \
   config/includes.chroot/usr/sbin/kodi-os-session-wrapper \
   config/includes.chroot/usr/sbin/kodi-os-recovery \
   config/hooks/live/0200-enable-kodi-os.hook.chroot \
   config/hooks/live/0300-validate-kodi-os.hook.chroot \
-  config/hooks/live/0310-validate-boot-assets.hook.chroot
+  config/hooks/live/0310-validate-boot-assets.hook.chroot \
+  config/hooks/live/0320-validate-efi-layout.hook.chroot
 
 if [[ -f "$OS_DIR/calamares/settings.conf" ]]; then
   cp "$OS_DIR/calamares/settings.conf" config/includes.chroot/etc/calamares/settings.conf
