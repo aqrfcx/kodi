@@ -23,7 +23,7 @@ mkdir -p config/package-lists config/includes.chroot/etc/systemd/system \
   config/includes.chroot/usr/sbin config/includes.chroot/opt/kodi-os config/hooks/live
 cp "$OS_DIR/package-lists/kodi-os.list.chroot" config/package-lists/
 cp "$OS_DIR/systemd/kodi-os.target" config/includes.chroot/etc/systemd/system/
-for service in kodi-os-session.service kodi-os-firstboot.service kodi-os-recovery.service \
+for service in kodi-os-storage-init.service kodi-os-session.service kodi-os-firstboot.service kodi-os-recovery.service \
   kodi-os-gaming-init.service kodi-os-controller-init.service kodi-os-network-init.service \
   kodi-os-healthcheck.service kodi-os-storage-check.service kodi-os-update.service; do
   cp "$OS_DIR/$service" config/includes.chroot/etc/systemd/system/
