@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROM="${1:-}"
+[[ -n "$ROM" && -f "$ROM" ]] || { echo "Usage: kodi-os-game-launcher /storage/roms/<platform>/game" >&2; exit 2; }
+
+ext="${ROM##*.}"
+ext="${ext,,}"
+dir="$(dirname "$ROM")"
+platform="$(basename "$dir")"
+
+run() { command -v "$1" >/dev/null 2>&1 || { echo "Required runtime '$1' is not installed" >&2; exit 3; }; exec "$@"; }
+
+case "$platform:$ext" in
+  ps2:iso|ps2:bin|ps2:chd|ps2:cue) run pcsx2 "$ROM" ;;
+  pc:exe) run gamemoderun wine "$ROM" ;;
+  nes:nes|snes:sfc|snes:smc|gb:gb|gb:gbc|gba:gba|n64:n64|ps1:cue|ps1:chd|megadrive:md|megadrive:gen|dreamcast:cdi|dreamcast:gdi|gamecube:iso|wii:iso|arcade:zip)
+    run retroarch "$ROM" ;;
+  *) echo "No launcher profile for '$platform' with .$ext" >&2; exit 4 ;;
+esac
