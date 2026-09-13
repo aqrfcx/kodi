@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+fail() { echo "Kodi OS EFI validation failed: $*" >&2; exit 1; }
+
+# The installed system must have the tooling needed to inspect and mount an EFI
+# System Partition. Do not create or format a disk from this validation hook.
+for cmd in lsblk blkid findmnt mountpoint; do
+  command -v "$cmd" >/dev/null 2>&1 || fail "missing command: $cmd"
+done
+
+dpkg-query -W grub-efi-amd64 >/dev/null 2>&1 || fail "grub-efi-amd64 missing"
+dpkg-query -W linux-image-amd64 >/dev/null 2>&1 || fail "linux-image-amd64 missing"
+
+# Ensure the target filesystem has an EFI mount-point directory available.
+install -d -m 0755 /boot/efi
+
+# Calamares performs the actual disk operations during installation. This hook
+# deliberately validates prerequisites only; it must never format a user's disk.
+echo "Kodi OS EFI prerequisite validation: PASS"
