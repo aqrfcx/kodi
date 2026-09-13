@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+RUN_DIR=/run/kodi-os
+STATE="$RUN_DIR/devices"
+mkdir -p "$RUN_DIR"
+
+while :; do
+  tmp="${STATE}.tmp"
+  {
+    printf 'updated=%s\n' "$(date -Is)"
+    printf '[input]\n'
+    if [[ -d /dev/input ]]; then
+      for event in /dev/input/event*; do
+        [[ -e "$event" ]] || continue
+        name="input-device"
+        if command -v udevadm >/dev/null 2>&1; then
+          name="$(udevadm info --query=property --name="$event" 2>/dev/null | sed -n 's/^NAME=//p' | head -n1 || true)"
+        fi
+        printf '%s\t%s\n' "$event" "${name:-input-device}"
+      done
+    fi
+    printf '[usb]\n'
+    if command -v lsusb >/dev/null 2>&1; then
+      lsusb 2>/dev/null || true
+    fi
+  } > "$tmp"
+  chmod 0644 "$tmp"
+  mv -f "$tmp" "$STATE"
+  sleep 3
+done
