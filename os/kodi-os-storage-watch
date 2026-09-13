@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+CATALOG_SERVICE="kodi-os-game-catalog.service"
+ROOT="/storage"
+
+refresh() {
+  systemctl start "$CATALOG_SERVICE" >/dev/null 2>&1 || true
+}
+
+refresh
+
+udevadm monitor --udev --subsystem-match=block --property 2>/dev/null | while IFS= read -r line; do
+  case "$line" in
+    ACTION=add|ACTION=remove|ACTION=change)
+      refresh
+      ;;
+  esac
+done
