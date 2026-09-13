@@ -1,0 +1,12 @@
+[Unit]
+Description=Kodi OS hardware and storage health check
+After=local-fs.target systemd-udev-settle.service
+Before=kodi-os-session.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/kodi-os-healthcheck
+RemainAfterExit=yes
+
+[Install]
+WantedBy=kodi-os.target
