@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+usage() {
+  echo "Usage: kodi-os-app-launcher {browser|files|terminal} [args...]" >&2
+  exit 2
+}
+
+[[ $# -ge 1 ]] || usage
+case "$1" in
+  browser)
+    shift
+    if command -v chromium >/dev/null 2>&1; then
+      exec chromium --no-first-run --no-default-browser-check "$@"
+    fi
+    exec firefox-esr "$@"
+    ;;
+  files)
+    shift
+    exec thunar "${1:-/storage}"
+    ;;
+  terminal)
+    shift
+    exec xterm "$@"
+    ;;
+  *)
+    usage
+    ;;
+esac
