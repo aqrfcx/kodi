@@ -52,6 +52,8 @@ bash-completion
 linux-image-amd64
 systemd-sysv
 grub-efi-amd64
+shim-signed
+grub-efi-amd64-signed
 firmware-linux-free
 firmware-iwlwifi
 firmware-realtek
