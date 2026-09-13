@@ -1,0 +1,12 @@
+[Unit]
+Description=Kodi OS controller discovery
+After=systemd-udev-settle.service bluetooth.service
+Before=kodi-os-session.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/kodi-os-controller-init
+RemainAfterExit=yes
+
+[Install]
+WantedBy=kodi-os.target
