@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# Controllers are handled by the Linux input stack and Kodi/emulators. This
+# helper only verifies and exposes useful runtime information; it never writes
+# arbitrary mappings into a user's device or firmware.
+mkdir -p /run/kodi-os
+
+if command -v udevadm >/dev/null 2>&1; then
+  udevadm settle --timeout=10 || true
+fi
+
+: > /run/kodi-os/controllers
+if [[ -d /dev/input ]]; then
+  for event in /dev/input/event*; do
+    [[ -e "$event" ]] || continue
+    name=""
+    if command -v udevadm >/dev/null 2>&1; then
+      name="$(udevadm info --query=property --name="$event" 2>/dev/null | sed -n 's/^NAME=//p' | head -n1 || true)"
+    fi
+    printf '%s\t%s\n' "$event" "${name:-input-device}" >> /run/kodi-os/controllers
+  done
+fi
+
+chmod 0644 /run/kodi-os/controllers
