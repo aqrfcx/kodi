@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+RUN_DIR=/run/kodi-os
+STATE="$RUN_DIR/network"
+mkdir -p "$RUN_DIR"
+
+# NetworkManager is the single network control plane. Do not manipulate routes,
+# firewall rules, or interfaces directly from this helper.
+if ! command -v nmcli >/dev/null 2>&1; then
+  printf 'status=unavailable\n' > "$STATE"
+  exit 0
+fi
+
+printf 'status=starting\n' > "$STATE"
+nm-online -q --timeout=20 2>/dev/null || true
+
+state="$(nmcli -t -f GENERAL.STATE general 2>/dev/null | head -n1 || true)"
+connectivity="$(nmcli -t -f CONNECTIVITY general 2>/dev/null | head -n1 || true)"
+interfaces="$(nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device 2>/dev/null || true)"
+
+{
+  printf 'status=ready\n'
+  printf 'state=%s\n' "${state:-unknown}"
+  printf 'connectivity=%s\n' "${connectivity:-unknown}"
+  printf '%s\n' "$interfaces"
+} > "$STATE"
+chmod 0644 "$STATE"
