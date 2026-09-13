@@ -1,0 +1,12 @@
+[Unit]
+Description=Kodi OS gaming runtime check
+After=kodi-os-storage-init.service
+Wants=kodi-os-storage-init.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/kodi-os-gaming-check
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
