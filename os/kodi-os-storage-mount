@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+DEV="${1:-}"
+[[ -b "$DEV" ]] || { echo "Not a block device: $DEV" >&2; exit 2; }
+
+command -v udisksctl >/dev/null 2>&1 || { echo "udisksctl is required" >&2; exit 3; }
+
+# Never mount whole disks that still contain a partition table; mount only
+# filesystem-bearing partitions. UDisks2 handles filesystem detection,
+# permissions, and safe unmount semantics.
+TYPE="$(lsblk -ndo TYPE "$DEV" 2>/dev/null || true)"
+[[ "$TYPE" == "part" ]] || exit 0
+
+MOUNTPOINT="$(udisksctl mount -b "$DEV" --no-user-interaction 2>/dev/null | sed -n 's/^Mounted .* at \(.*\)\.$/\1/p')"
+[[ -n "$MOUNTPOINT" ]] || exit 4
+
+mkdir -p /storage/external
+NAME="$(lsblk -ndo UUID "$DEV" 2>/dev/null || true)"
+[[ -n "$NAME" ]] || NAME="$(basename "$DEV")"
+SAFE="$(printf '%s' "$NAME" | tr -c 'A-Za-z0-9._-' '_')"
+LINK="/storage/external/$SAFE"
+ln -sfn "$MOUNTPOINT" "$LINK"
+
+printf '%s\n' "$LINK"
