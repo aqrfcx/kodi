@@ -6,6 +6,7 @@ systemctl enable kodi-os-session.service
 systemctl enable kodi-os-gaming-init.service
 systemctl enable kodi-os-controller-init.service
 systemctl enable kodi-os-network-init.service
+systemctl enable kodi-os-healthcheck.service
 systemctl enable kodi-os-recovery.service
 systemctl enable kodi-os.target
 
