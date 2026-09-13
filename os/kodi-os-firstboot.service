@@ -1,0 +1,13 @@
+[Unit]
+Description=Kodi OS first boot initialization
+After=local-fs.target
+Before=kodi-os-session.service
+ConditionPathExists=!/storage/.kodi-os-initialized
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/kodi-os-firstboot
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
