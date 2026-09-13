@@ -24,13 +24,15 @@ mkdir -p config/package-lists config/includes.chroot/etc/systemd/system \
 cp "$OS_DIR/package-lists/kodi-os.list.chroot" config/package-lists/
 cp "$OS_DIR/systemd/kodi-os.target" config/includes.chroot/etc/systemd/system/
 for service in kodi-os-storage-init.service kodi-os-session.service kodi-os-firstboot.service kodi-os-recovery.service \
-  kodi-os-gaming-init.service kodi-os-controller-init.service kodi-os-network-init.service kodi-os-network-watch.service \
-  kodi-os-healthcheck.service kodi-os-storage-check.service kodi-os-update.service; do
+  kodi-os-gaming-init.service kodi-os-controller-init.service kodi-os-device-watch.service \
+  kodi-os-network-init.service kodi-os-network-watch.service kodi-os-healthcheck.service \
+  kodi-os-storage-check.service kodi-os-update.service; do
   cp "$OS_DIR/$service" config/includes.chroot/etc/systemd/system/
 done
 for script in firstboot.sh kodi-os-hardware.sh kodi-os-session-wrapper.sh kodi-os-recovery \
   kodi-os-storage-init kodi-os-storage-check kodi-os-gaming-init kodi-os-controller-init \
-  kodi-os-network-init kodi-os-network-watch kodi-os-healthcheck kodi-os-app-launcher kodi-os-update; do
+  kodi-os-device-watch kodi-os-network-init kodi-os-network-watch kodi-os-healthcheck \
+  kodi-os-app-launcher kodi-os-update; do
   cp "$OS_DIR/$script" "config/includes.chroot/usr/sbin/${script%.sh}"
 done
 cp "$OS_DIR/kodi-os-recovery-grub.cfg" config/includes.chroot/opt/kodi-os/kodi-os-recovery-grub.cfg
