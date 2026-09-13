@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+install -d -m 0755 /etc/calamares
+install -m 0644 /opt/kodi-os/calamares/settings.conf /etc/calamares/settings.conf
+
+# Keep the installer visible from the Kodi OS application menu when a desktop
+# menu consumer is present. Kodi itself can launch calamares directly later.
+install -d -m 0755 /usr/share/applications
+cat >/usr/share/applications/kodi-os-installer.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Install Kodi OS
+Comment=Install Kodi OS to an internal disk
+Exec=pkexec calamares
+Terminal=false
+Categories=System;Settings;
+EOF
