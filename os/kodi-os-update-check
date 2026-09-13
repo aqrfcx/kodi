@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+STATE_DIR=/var/lib/kodi-os
+STATE="$STATE_DIR/update-state"
+mkdir -p "$STATE_DIR"
+
+# This is deliberately a metadata/check-only operation. It never replaces the
+# running OS automatically. A future signed update mechanism can consume this
+# state without turning a network response into executable code.
+channel="${KODI_OS_UPDATE_CHANNEL:-stable}"
+manifest="${KODI_OS_UPDATE_MANIFEST:-}"
+
+{
+  printf 'channel=%s\n' "$channel"
+  printf 'current_kernel=%s\n' "$(uname -r)"
+  printf 'manifest_configured=%s\n' "$([[ -n "$manifest" ]] && echo yes || echo no)"
+  printf 'status=not-checked\n'
+} > "$STATE"
+chmod 0644 "$STATE"
