@@ -8,6 +8,7 @@ for service in \
   kodi-os-gaming-init.service \
   kodi-os-gaming-check.service \
   kodi-os-game-catalog.service \
+  kodi-os-storage-mount.service \
   kodi-os-storage-watch.service \
   kodi-os-controller-init.service \
   kodi-os-device-watch.service \
@@ -21,10 +22,12 @@ for service in \
 done
 
 systemctl enable kodi-os-game-catalog.timer
+systemctl enable kodi-os-storage-mount.path
 
-for service in NetworkManager.service upower.service bluetooth.service dbus.service; do
+for service in NetworkManager.service udisks2.service upower.service bluetooth.service dbus.service; do
   systemctl enable "$service" 2>/dev/null || true
 done
 
 chmod 0755 /usr/sbin/kodi-os-update
 chmod 0755 /usr/sbin/kodi-os-storage-watch
+chmod 0755 /usr/sbin/kodi-os-storage-mount
