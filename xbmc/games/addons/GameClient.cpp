@@ -1,0 +1,1284 @@
+/*
+ *  Copyright (C) 2012-2018 Team Kodi
+ *  This file is part of Kodi - https://kodi.tv
+ *
+ *  SPDX-License-Identifier: GPL-2.0-or-later
+ *  See LICENSES/README.md for more information.
+ */
+
+#include "GameClient.h"
+
+#include "FileItem.h"
+#include "GameClientCallbacks.h"
+#include "GameClientInGameSaves.h"
+#include "GameClientProperties.h"
+#include "GameClientTranslator.h"
+#include "ServiceBroker.h"
+#include "URL.h"
+#include "addons/AddonManager.h"
+#include "addons/BinaryAddonCache.h"
+#include "addons/addoninfo/AddonInfo.h"
+#include "addons/addoninfo/AddonType.h"
+#include "filesystem/Directory.h"
+#include "filesystem/SpecialProtocol.h"
+#include "games/GameServices.h"
+#include "games/addons/cheevos/GameClientCheevos.h"
+#include "games/addons/disc/GameClientDiscModel.h"
+#include "games/addons/disc/GameClientDiscs.h"
+#include "games/addons/input/GameClientInput.h"
+#include "games/addons/streams/GameClientStreams.h"
+#include "games/addons/streams/IGameClientStream.h"
+#include "guilib/GUIWindowManager.h"
+#include "guilib/WindowIDs.h"
+#include "input/actions/Action.h"
+#include "input/actions/ActionIDs.h"
+#include "messaging/ApplicationMessenger.h"
+#include "messaging/helpers/DialogOKHelper.h"
+#include "resources/LocalizeStrings.h"
+#include "resources/ResourcesComponent.h"
+#include "utils/FileUtils.h"
+#include "utils/StringUtils.h"
+#include "utils/URIUtils.h"
+#include "utils/log.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstring>
+#include <iterator>
+#include <memory>
+#include <mutex>
+#include <utility>
+
+using namespace KODI;
+using namespace GAME;
+
+#define EXTENSION_SEPARATOR "|"
+#define EXTENSION_WILDCARD "*"
+
+#define GAME_PROPERTY_EXTENSIONS "extensions"
+#define GAME_PROPERTY_SUPPORTS_VFS "supports_vfs"
+#define GAME_PROPERTY_SUPPORTS_STANDALONE "supports_standalone"
+
+// --- NormalizeExtension ------------------------------------------------------
+
+namespace
+{
+constexpr const char* GAME_PROPERTY_SUPPORTS_DISC_CONTROL = "supports_disc_control";
+constexpr const char* GAME_PROPERTY_PLATFORMS = "platforms";
+
+/*
+ * \brief Convert to lower case and canonicalize with a leading "."
+ */
+std::string NormalizeExtension(const std::string& strExtension)
+{
+  std::string ext = strExtension;
+
+  if (!ext.empty() && ext != EXTENSION_WILDCARD)
+  {
+    StringUtils::ToLower(ext);
+
+    if (ext[0] != '.')
+      ext.insert(0, ".");
+  }
+
+  return ext;
+}
+} // namespace
+
+// --- CGameClient -------------------------------------------------------------
+
+CGameClient::CGameClient(const ADDON::AddonInfoPtr& addonInfo)
+  : CAddonDll(addonInfo, ADDON::AddonType::GAMEDLL),
+    m_subsystems(CGameClientSubsystem::CreateSubsystems(*this, *m_ifc.game, m_critSection)),
+    m_bIsPlaying(false)
+{
+  using namespace ADDON;
+
+  std::vector<std::string> extensions = StringUtils::Split(
+      Type(AddonType::GAMEDLL)->GetValue(GAME_PROPERTY_EXTENSIONS).asString(), EXTENSION_SEPARATOR);
+  std::ranges::transform(extensions, std::inserter(m_extensions, m_extensions.begin()),
+                         NormalizeExtension);
+
+  // Check for wildcard extension
+  if (m_extensions.contains(EXTENSION_WILDCARD))
+  {
+    m_bSupportsAllExtensions = true;
+    m_extensions.clear();
+  }
+
+  m_bSupportsVFS =
+      addonInfo->Type(AddonType::GAMEDLL)->GetValue(GAME_PROPERTY_SUPPORTS_VFS).asBoolean();
+  m_bSupportsStandalone =
+      addonInfo->Type(AddonType::GAMEDLL)->GetValue(GAME_PROPERTY_SUPPORTS_STANDALONE).asBoolean();
+  m_supportsDiscControl = addonInfo->Type(AddonType::GAMEDLL)
+                              ->GetValue(GAME_PROPERTY_SUPPORTS_DISC_CONTROL)
+                              .asBoolean();
+
+  std::tie(m_emulatorName, m_platforms) = ParseLibretroName(Name());
+
+  const std::string platforms =
+      addonInfo->Type(AddonType::GAMEDLL)->GetValue(GAME_PROPERTY_PLATFORMS).asString();
+  if (!platforms.empty())
+    m_platforms = platforms;
+}
+
+CGameClient::~CGameClient(void)
+{
+  CloseFile();
+  CGameClientSubsystem::DestroySubsystems(m_subsystems);
+}
+
+std::string CGameClient::LibPath() const
+{
+  // If the game client requires a proxy, load its DLL instead
+  if (m_ifc.game->props->proxy_dll_count > 0)
+    return GetDllPath(m_ifc.game->props->proxy_dll_paths[0]);
+
+  return CAddonDll::LibPath();
+}
+
+ADDON::AddonPtr CGameClient::GetRunningInstance() const
+{
+  using namespace ADDON;
+
+  CBinaryAddonCache& addonCache = CServiceBroker::GetBinaryAddonCache();
+  return addonCache.GetAddonInstance(ID(), Type());
+}
+
+bool CGameClient::SupportsPath() const
+{
+  return !m_extensions.empty() || m_bSupportsAllExtensions;
+}
+
+bool CGameClient::IsExtensionValid(const std::string& strExtension) const
+{
+  if (strExtension.empty())
+    return false;
+
+  if (SupportsAllExtensions())
+    return true;
+
+  return m_extensions.contains(NormalizeExtension(strExtension));
+}
+
+bool CGameClient::Initialize(void)
+{
+  using namespace XFILE;
+
+  // Ensure user profile directory exists for add-on
+  if (!CDirectory::Exists(Profile()))
+    CDirectory::Create(Profile());
+
+  // Ensure directory exists for savestates
+  const CGameServices& gameServices = CServiceBroker::GetGameServices();
+  std::string savestatesDir = URIUtils::AddFileToFolder(gameServices.GetSavestatesFolder(), ID());
+  if (!CDirectory::Exists(savestatesDir))
+    CDirectory::Create(savestatesDir);
+
+  if (!AddonProperties().InitializeProperties())
+    return false;
+
+  m_ifc.game->toKodi->kodiInstance = this;
+  m_ifc.game->toKodi->EnableHardwareRendering = cb_enable_hardware_rendering;
+  m_ifc.game->toKodi->CloseGame = cb_close_game;
+  m_ifc.game->toKodi->GetPlaybackSpeed = cb_get_playback_speed;
+  m_ifc.game->toKodi->SetGameTiming = cb_set_game_timing;
+  m_ifc.game->toKodi->OpenStream = cb_open_stream;
+  m_ifc.game->toKodi->GetStreamBuffer = cb_get_stream_buffer;
+  m_ifc.game->toKodi->AddStreamData = cb_add_stream_data;
+  m_ifc.game->toKodi->ReleaseStreamBuffer = cb_release_stream_buffer;
+  m_ifc.game->toKodi->CloseStream = cb_close_stream;
+  m_ifc.game->toKodi->HwGetProcAddress = cb_hw_get_proc_address;
+  m_ifc.game->toKodi->InputEvent = cb_input_event;
+  m_ifc.game->toKodi->RCOnGameLoaded = cb_rc_on_game_loaded;
+  m_ifc.game->toKodi->RCOnAchievementTriggered = cb_rc_on_achievement_triggered;
+  m_ifc.game->toKodi->RCOnGameCompleted = cb_rc_on_game_completed;
+  m_ifc.game->toKodi->RCOnRichPresenceUpdated = cb_rc_on_rich_presence_updated;
+  m_ifc.game->toKodi->RCOnLoginResult = cb_rc_on_login_result;
+  m_ifc.game->toKodi->RCOnAchievementProgress = cb_rc_on_achievement_progress;
+  m_ifc.game->toKodi->RCOnServerError = cb_rc_on_server_error;
+  m_ifc.game->toKodi->RCOnConnectionChanged = cb_rc_on_connection_changed;
+  m_ifc.game->toKodi->RCOnChallengeIndicator = cb_rc_on_challenge_indicator;
+  m_ifc.game->toKodi->RCOnAchievementProgressShow = cb_rc_on_achievement_progress_show;
+  m_ifc.game->toKodi->RCOnAchievementProgressUpdate = cb_rc_on_achievement_progress_update;
+  m_ifc.game->toKodi->RCOnAchievementProgressHide = cb_rc_on_achievement_progress_hide;
+  m_ifc.game->toKodi->RCOnLeaderboardStarted = cb_rc_on_leaderboard_started;
+  m_ifc.game->toKodi->RCOnLeaderboardFailed = cb_rc_on_leaderboard_failed;
+  m_ifc.game->toKodi->RCOnLeaderboardSubmitted = cb_rc_on_leaderboard_submitted;
+  m_ifc.game->toKodi->RCOnLeaderboardTrackerShow = cb_rc_on_leaderboard_tracker_show;
+  m_ifc.game->toKodi->RCOnLeaderboardTrackerUpdate = cb_rc_on_leaderboard_tracker_update;
+  m_ifc.game->toKodi->RCOnLeaderboardTrackerHide = cb_rc_on_leaderboard_tracker_hide;
+  m_ifc.game->toKodi->RCOnLeaderboardScoreboard = cb_rc_on_leaderboard_scoreboard;
+  m_ifc.game->toKodi->RCOnReset = cb_rc_on_reset;
+  m_ifc.game->toKodi->RCOnSubsetCompleted = cb_rc_on_subset_completed;
+
+  memset(m_ifc.game->toAddon, 0, sizeof(KodiToAddonFuncTable_Game));
+
+  if (CreateInstance(&m_ifc) == ADDON_STATUS_OK)
+  {
+    Input().Initialize();
+    LogAddonProperties();
+    return true;
+  }
+
+  NotifyError(GAME_ERROR_UNKNOWN);
+
+  return false;
+}
+
+void CGameClient::Unload()
+{
+  Input().Deinitialize();
+
+  DestroyInstance(&m_ifc);
+}
+
+bool CGameClient::OpenFile(const CFileItem& file,
+                           RETRO::IStreamManager& streamManager,
+                           IGameInputCallback* input)
+{
+  // Check if we should open in standalone mode
+  if (file.GetPath().empty())
+    return false;
+
+  // Some cores "succeed" to load the file even if it doesn't exist
+  if (!CFileUtils::Exists(file.GetPath()))
+  {
+    // Failed to play game
+    // The required files can't be found.
+    MESSAGING::HELPERS::ShowOKDialogText(
+        CVariant{35210},
+        CVariant{CServiceBroker::GetResourcesComponent().GetLocalizeStrings().Get(35219)});
+    return false;
+  }
+
+  // Resolve special:// URLs
+  CURL translatedUrl(CSpecialProtocol::TranslatePath(file.GetPath()));
+
+  // Remove file:// from URLs if add-on doesn't support VFS
+  if (!m_bSupportsVFS)
+  {
+    if (translatedUrl.GetProtocol() == "file")
+      translatedUrl.SetProtocol("");
+  }
+
+  std::string path = translatedUrl.Get();
+  CLog::Log(LOGDEBUG, "GameClient: Loading {}", CURL::GetRedacted(path));
+
+  std::unique_lock lock(m_critSection);
+
+  if (!Initialized())
+    return false;
+
+  CloseFile();
+
+  GAME_ERROR error = GAME_ERROR_FAILED;
+
+  // Loading the game might require the stream subsystem to be initialized
+  Streams().Initialize(streamManager);
+
+  // Initialize disc control subsystem, if supported
+  if (SupportsDiscControl())
+    Discs().Initialize(path);
+
+  // Before the game loads: the client signs in as part of identifying it
+  Cheevos().SendCredentials();
+
+  const auto loadGame = [this, &path]()
+  {
+    GAME_ERROR loadError = GAME_ERROR_FAILED;
+    try
+    {
+      LogError(loadError = m_ifc.game->toAddon->LoadGame(m_ifc.game, path.c_str()), "LoadGame()");
+    }
+    catch (...)
+    {
+      LogException("LoadGame()");
+    }
+    return loadError;
+  };
+
+  error = loadGame();
+
+  if (error != GAME_ERROR_NO_ERROR && SupportsDiscControl() && Discs().HasPersistedState())
+  {
+    CLog::Log(LOGWARNING,
+              "GameClient: Load with persisted disc hint failed; retrying original source media");
+    Discs().Initialize(path, false);
+    error = loadGame();
+  }
+
+  if (error != GAME_ERROR_NO_ERROR)
+  {
+    NotifyError(error);
+    Streams().Deinitialize();
+    return false;
+  }
+
+  if (!InitializeGameplay(path, streamManager, input))
+  {
+    NotifyError(GAME_ERROR_UNKNOWN);
+    Streams().Deinitialize();
+    return false;
+  }
+
+  return true;
+}
+
+bool CGameClient::OpenStandalone(RETRO::IStreamManager& streamManager, IGameInputCallback* input)
+{
+  CLog::Log(LOGDEBUG, "GameClient: Loading {} in standalone mode", ID());
+
+  std::unique_lock lock(m_critSection);
+
+  if (!Initialized())
+    return false;
+
+  CloseFile();
+
+  GAME_ERROR error = GAME_ERROR_FAILED;
+
+  // Loading the game might require the stream subsystem to be initialized
+  Streams().Initialize(streamManager);
+
+  // As for a game loaded from a file. Standalone clients can support
+  // achievements too, and sending nothing is how a session left over from a
+  // player who has since signed out gets dropped
+  Cheevos().SendCredentials();
+
+  try
+  {
+    LogError(error = m_ifc.game->toAddon->LoadStandalone(m_ifc.game), "LoadStandalone()");
+  }
+  catch (...)
+  {
+    LogException("LoadStandalone()");
+  }
+
+  if (error != GAME_ERROR_NO_ERROR)
+  {
+    NotifyError(error);
+    Streams().Deinitialize();
+    return false;
+  }
+
+  if (!InitializeGameplay("", streamManager, input))
+  {
+    NotifyError(GAME_ERROR_UNKNOWN);
+    Streams().Deinitialize();
+    return false;
+  }
+
+  return true;
+}
+
+bool CGameClient::InitializeGameplay(const std::string& gamePath,
+                                     RETRO::IStreamManager& streamManager,
+                                     IGameInputCallback* input)
+{
+  const auto unloadGame = [this]()
+  {
+    try
+    {
+      return LogError(m_ifc.game->toAddon->UnloadGame(m_ifc.game), "UnloadGame()");
+    }
+    catch (...)
+    {
+      LogException("UnloadGame()");
+      return false;
+    }
+  };
+
+  bool gameInfoLoaded = LoadGameInfo();
+  if (SupportsDiscControl() && Discs().HasPersistedState() &&
+      (!gameInfoLoaded || !Discs().RestoreDiscList()))
+  {
+    CLog::Log(
+        LOGWARNING,
+        "GameClient: Startup with persisted disc state failed; reloading original source media");
+    if (!unloadGame() || gamePath.empty())
+      return false;
+
+    Discs().Initialize(gamePath, false);
+    GAME_ERROR error = GAME_ERROR_FAILED;
+    try
+    {
+      LogError(error = m_ifc.game->toAddon->LoadGame(m_ifc.game, gamePath.c_str()), "LoadGame()");
+    }
+    catch (...)
+    {
+      LogException("LoadGame()");
+    }
+    if (error != GAME_ERROR_NO_ERROR)
+      return false;
+    gameInfoLoaded = LoadGameInfo();
+  }
+
+  if (!gameInfoLoaded)
+  {
+    unloadGame();
+    return false;
+  }
+  if (SupportsDiscControl())
+    Discs().RefreshDiscStateLive();
+
+  Input().Start(input);
+
+  m_bIsPlaying = true;
+  m_hasFrameRun = false;
+  m_gamePath = gamePath;
+  m_input = input;
+
+  if (SupportsDiscControl())
+    Discs().SaveDiscState();
+
+  m_inGameSaves = std::make_unique<CGameClientInGameSaves>(this, m_ifc.game);
+  m_inGameSaves->Load();
+
+  return true;
+}
+
+bool CGameClient::LoadGameInfo()
+{
+  bool bRequiresGameLoop;
+  try
+  {
+    bRequiresGameLoop = m_ifc.game->toAddon->RequiresGameLoop(m_ifc.game);
+  }
+  catch (...)
+  {
+    LogException("RequiresGameLoop()");
+    return false;
+  }
+
+  // Get information about system timings
+  // Can be called only after retro_load_game()
+  game_system_timing timingInfo = {};
+
+  bool bSuccess = false;
+  try
+  {
+    bSuccess =
+        LogError(m_ifc.game->toAddon->GetGameTiming(m_ifc.game, &timingInfo), "GetGameTiming()");
+  }
+  catch (...)
+  {
+    LogException("GetGameTiming()");
+  }
+
+  if (!bSuccess)
+  {
+    CLog::Log(LOGERROR, "GameClient: Failed to get timing info");
+    return false;
+  }
+
+  GAME_REGION region;
+  try
+  {
+    region = m_ifc.game->toAddon->GetRegion(m_ifc.game);
+  }
+  catch (...)
+  {
+    LogException("GetRegion()");
+    return false;
+  }
+
+  size_t serializeSize;
+  try
+  {
+    serializeSize = m_ifc.game->toAddon->SerializeSize(m_ifc.game);
+  }
+  catch (...)
+  {
+    LogException("SerializeSize()");
+    return false;
+  }
+
+  CLog::Log(LOGINFO, "GAME: ---------------------------------------");
+  CLog::Log(LOGINFO, "GAME: Game loop:      {}", bRequiresGameLoop ? "true" : "false");
+  CLog::Log(LOGINFO, "GAME: FPS:            {:f}", timingInfo.fps);
+  CLog::Log(LOGINFO, "GAME: Sample Rate:    {:f}", timingInfo.sample_rate);
+  CLog::Log(LOGINFO, "GAME: Region:         {}", CGameClientTranslator::TranslateRegion(region));
+  CLog::Log(LOGINFO, "GAME: Savestate size: {}", serializeSize);
+  CLog::Log(LOGINFO, "GAME: ---------------------------------------");
+
+  m_bRequiresGameLoop = bRequiresGameLoop;
+  m_serializeSize = serializeSize;
+  m_framerate = timingInfo.fps;
+  m_samplerate = timingInfo.sample_rate;
+  m_region = region;
+
+  return true;
+}
+
+void CGameClient::NotifyError(GAME_ERROR error)
+{
+  std::string missingResource;
+
+  if (error == GAME_ERROR_RESTRICTED)
+    missingResource = GetMissingResource();
+
+  // Check if hardware rendering was attempted
+  if (Streams().HardwareRenderingAttempted())
+  {
+    // Failed to play game
+    // This game requires OpenGL support for 3D rendering. OpenGL support is still under development.
+    MESSAGING::HELPERS::ShowOKDialogText(CVariant{35210}, CVariant{35271});
+  }
+  else if (!missingResource.empty())
+  {
+    // Failed to play game
+    // This game requires the following add-on: %s
+    MESSAGING::HELPERS::ShowOKDialogText(
+        CVariant{35210},
+        CVariant{StringUtils::Format(
+            CServiceBroker::GetResourcesComponent().GetLocalizeStrings().Get(35211),
+            missingResource)});
+  }
+  else
+  {
+    // Failed to play game
+    // The emulator "%s" had an internal error.
+    MESSAGING::HELPERS::ShowOKDialogText(
+        CVariant{35210},
+        CVariant{StringUtils::Format(
+            CServiceBroker::GetResourcesComponent().GetLocalizeStrings().Get(35213), Name())});
+  }
+}
+
+std::string CGameClient::GetMissingResource()
+{
+  using namespace ADDON;
+
+  std::string strAddonId;
+
+  const auto& dependencies = GetDependencies();
+  for (auto it = dependencies.begin(); it != dependencies.end(); ++it)
+  {
+    const std::string& strDependencyId = it->id;
+    if (StringUtils::StartsWith(strDependencyId, "resource.games"))
+    {
+      AddonPtr addon;
+      const bool bInstalled =
+          CServiceBroker::GetAddonMgr().GetAddon(strDependencyId, addon, OnlyEnabled::CHOICE_YES);
+      if (!bInstalled)
+      {
+        strAddonId = strDependencyId;
+        break;
+      }
+    }
+  }
+
+  return strAddonId;
+}
+
+void CGameClient::Reset()
+{
+  std::unique_lock lock(m_critSection);
+
+  if (m_bIsPlaying)
+  {
+    try
+    {
+      LogError(m_ifc.game->toAddon->Reset(m_ifc.game), "Reset()");
+    }
+    catch (...)
+    {
+      LogException("Reset()");
+    }
+  }
+}
+
+void CGameClient::CloseFile()
+{
+  std::unique_lock lock(m_critSection);
+
+  if (m_bIsPlaying)
+  {
+    m_inGameSaves->Save();
+    m_inGameSaves.reset();
+
+    m_bIsPlaying = false;
+    m_hasFrameRun = false;
+    m_gamePath.clear();
+    m_serializeSize = 0;
+    m_input = nullptr;
+
+    Input().Stop();
+
+    if (SupportsDiscControl())
+      Discs().Deinitialize();
+
+    try
+    {
+      LogError(m_ifc.game->toAddon->UnloadGame(m_ifc.game), "UnloadGame()");
+    }
+    catch (...)
+    {
+      LogException("UnloadGame()");
+    }
+
+    Cheevos().OnGameClosed();
+
+    Streams().Deinitialize();
+  }
+}
+
+void CGameClient::PollInput()
+{
+  IGameInputCallback* input;
+
+  {
+    std::unique_lock lock(m_critSection);
+    input = m_input;
+  }
+
+  // The event scanner calls back into the client on another thread while this waits.
+  if (input)
+    input->PollInput();
+}
+
+void CGameClient::RunFrame(bool pollInput)
+{
+  if (pollInput)
+    PollInput();
+
+  std::unique_lock lock(m_critSection);
+
+  if (m_bIsPlaying)
+  {
+    try
+    {
+      LogError(m_ifc.game->toAddon->RunFrame(m_ifc.game), "RunFrame()");
+
+      // A client using the asynchronous audio interface produces no audio of
+      // its own accord: it waits to be asked, once per frame, and writes what
+      // it has from this thread. One that is never asked is silent, and since
+      // the frame rate is paced against the audio it delivers, it also runs as
+      // fast as the machine allows. Clients on the ordinary synchronous path
+      // answer this with GAME_ERROR_NOT_IMPLEMENTED and are unaffected.
+      const GAME_ERROR audioError = m_ifc.game->toAddon->AudioAvailable(m_ifc.game);
+      if (audioError != GAME_ERROR_NO_ERROR && audioError != GAME_ERROR_NOT_IMPLEMENTED)
+        LogError(audioError, "AudioAvailable()");
+
+      m_hasFrameRun = true;
+    }
+    catch (...)
+    {
+      LogException("RunFrame()");
+    }
+  }
+}
+
+bool CGameClient::Serialize(uint8_t* data, size_t size)
+{
+  if (data == nullptr || size == 0)
+    return false;
+
+  std::unique_lock lock(m_critSection);
+
+  bool bSuccess = false;
+  if (m_bIsPlaying)
+  {
+    try
+    {
+      bSuccess = LogError(m_ifc.game->toAddon->Serialize(m_ifc.game, data, size), "Serialize()");
+    }
+    catch (...)
+    {
+      LogException("Serialize()");
+    }
+  }
+
+  return bSuccess;
+}
+
+RestoreResult CGameClient::Deserialize(const uint8_t* data,
+                                       size_t size,
+                                       const CGameClientDiscModel* discState)
+{
+  if (data == nullptr || size == 0)
+    return RestoreResult::Rejected;
+
+  std::unique_lock lock(m_critSection);
+  if (!m_bIsPlaying || (discState && !SupportsDiscControl()))
+    return RestoreResult::Rejected;
+
+  std::optional<CGameClientDiscModel> previousDiscs;
+  const auto restorePreviousDiscs = [&]()
+  {
+    if (previousDiscs)
+      Discs().SetDiscModel(*previousDiscs);
+    if (!Discs().RestoreDiscList())
+    {
+      CLog::Log(LOGERROR,
+                "RetroPlayer[DISC]: Failed to roll back disc state after restore failure");
+      return false;
+    }
+    return true;
+  };
+
+  if (discState)
+  {
+    if (!(Discs().GetDiscsForSnapshot() == *discState))
+      previousDiscs = Discs().GetDiscsForSnapshot();
+    Discs().SetDiscModel(*discState);
+
+    // Cores can validate saved media against their current image list.
+    if (!Discs().RestoreDiscList() || (!discState->IsEjected() && !Discs().PrepareForDeserialize()))
+    {
+      CLog::Log(LOGERROR, "RetroPlayer[DISC]: Failed to prepare media before deserializing");
+      return restorePreviousDiscs() ? RestoreResult::Rejected : RestoreResult::StateUncertain;
+    }
+  }
+  else if (SupportsDiscControl())
+  {
+    Discs().SetEjected(false);
+  }
+
+  const auto deserialize = [&]()
+  {
+    // The core may rebuild its image list while loading machine state.
+    if (SupportsDiscControl())
+      Discs().InvalidateRestoreCache();
+
+    try
+    {
+      return LogError(m_ifc.game->toAddon->Deserialize(m_ifc.game, data, size), "Deserialize()");
+    }
+    catch (...)
+    {
+      LogException("Deserialize()");
+      return false;
+    }
+  };
+
+  bool bSuccess = deserialize();
+  // Some disc cores only accept machine states with the tray closed. Preserve the target model.
+  if (!bSuccess && discState && Discs().PrepareForDeserialize())
+    bSuccess = deserialize();
+
+  // Some cores initialize on their first frame.
+  if (!bSuccess && !m_hasFrameRun)
+  {
+    RunFrame(false);
+    bSuccess = deserialize();
+  }
+
+  if (bSuccess && SupportsDiscControl())
+  {
+    bSuccess = Discs().RestoreDiscList();
+    if (discState)
+    {
+      if (bSuccess && previousDiscs)
+        Discs().SaveDiscState();
+    }
+    else if (bSuccess)
+      Discs().RefreshDiscState();
+  }
+
+  if (!bSuccess && discState)
+    restorePreviousDiscs();
+  // Media rollback cannot undo machine memory changed by a failed deserialize.
+  return bSuccess ? RestoreResult::Restored : RestoreResult::StateUncertain;
+}
+
+bool CGameClient::SerializeAchievementState(std::vector<uint8_t>& data)
+{
+  data.clear();
+
+  if (!m_bIsPlaying)
+    return false;
+
+  // One lock for both calls: the size is only valid for as long as the client
+  // hasn't run another frame, so querying and serializing separately can size
+  // the buffer from one frame and fill it from another
+  std::unique_lock lock(m_critSection);
+
+  size_t size = 0;
+  try
+  {
+    size = m_ifc.game->toAddon->AchievementStateSize(m_ifc.game);
+  }
+  catch (...)
+  {
+    LogException("AchievementStateSize()");
+    return false;
+  }
+
+  if (size == 0)
+    return false;
+
+  data.resize(size);
+
+  try
+  {
+    if (LogError(m_ifc.game->toAddon->SerializeAchievements(m_ifc.game, data.data(), size),
+                 "SerializeAchievements()"))
+      return true;
+  }
+  catch (...)
+  {
+    LogException("SerializeAchievements()");
+  }
+
+  data.clear();
+
+  return false;
+}
+
+bool CGameClient::DeserializeAchievements(const uint8_t* data, size_t size)
+{
+  // An empty payload is forwarded, not refused: it tells the client the
+  // machine state jumped without carrying anything to restore. See the caller
+  // in CReversiblePlayback::LoadSavestate().
+  if (!m_bIsPlaying)
+    return false;
+
+  std::unique_lock lock(m_critSection);
+
+  try
+  {
+    return LogError(m_ifc.game->toAddon->DeserializeAchievements(m_ifc.game, data, size),
+                    "DeserializeAchievements()");
+  }
+  catch (...)
+  {
+    LogException("DeserializeAchievements()");
+  }
+
+  return false;
+}
+
+void CGameClient::LogAddonProperties(void) const
+{
+  CLog::Log(LOGINFO, "GAME: ------------------------------------");
+  CLog::Log(LOGINFO, "GAME: Loaded DLL for {}", ID());
+  CLog::Log(LOGINFO, "GAME: Client:              {}", Name());
+  CLog::Log(LOGINFO, "GAME: Version:             {}", Version().asString());
+  CLog::Log(LOGINFO, "GAME: Valid extensions:    {}", StringUtils::Join(m_extensions, " "));
+  CLog::Log(LOGINFO, "GAME: Supports VFS:        {}", m_bSupportsVFS);
+  CLog::Log(LOGINFO, "GAME: Supports standalone: {}", m_bSupportsStandalone);
+  CLog::Log(LOGINFO, "GAME: Disc control:        {}", m_supportsDiscControl);
+  CLog::Log(LOGINFO, "GAME: ------------------------------------");
+}
+
+bool CGameClient::LogError(GAME_ERROR error, const char* strMethod) const
+{
+  if (error != GAME_ERROR_NO_ERROR)
+  {
+    // Optional parts of the API are declined rather than failed, so don't
+    // report them as errors.
+    const int level = (error == GAME_ERROR_NOT_IMPLEMENTED) ? LOGDEBUG : LOGERROR;
+
+    CLog::Log(level, "GAME - {} - addon '{}' returned: {}", strMethod, ID(),
+              CGameClientTranslator::ToString(error));
+    return false;
+  }
+  return true;
+}
+
+void CGameClient::LogException(const char* strFunctionName) const
+{
+  CLog::Log(LOGERROR, "GAME: exception caught while trying to call '{}' on add-on {}",
+            strFunctionName, ID());
+  CLog::Log(LOGERROR, "Please contact the developer of this add-on: {}", Author());
+}
+
+void CGameClient::HardwareContextReset()
+{
+  try
+  {
+    LogError(m_ifc.game->toAddon->HwContextReset(m_ifc.game), "HwContextReset()");
+  }
+  catch (...)
+  {
+    LogException("HwContextReset()");
+  }
+}
+
+bool CGameClient::cb_enable_hardware_rendering(KODI_HANDLE kodiInstance,
+                                               const game_hw_rendering_properties* properties)
+{
+  if (properties == nullptr)
+    return false;
+
+  CGameClient* gameClient = static_cast<CGameClient*>(kodiInstance);
+  if (gameClient == nullptr)
+    return false;
+
+  return gameClient->Streams().EnableHardwareRendering(*properties);
+}
+
+void CGameClient::cb_close_game(KODI_HANDLE kodiInstance)
+{
+  CServiceBroker::GetAppMessenger()->PostMsg(TMSG_GUI_ACTION, WINDOW_INVALID, -1,
+                                             static_cast<void*>(new CAction(ACTION_STOP)));
+}
+
+double CGameClient::cb_get_playback_speed(KODI_HANDLE kodiInstance)
+{
+  CGameClient* gameClient = static_cast<CGameClient*>(kodiInstance);
+  if (!gameClient)
+    return 0.0;
+
+  return gameClient->m_playbackSpeed;
+}
+
+void CGameClient::cb_set_game_timing(KODI_HANDLE kodiInstance, const game_system_timing* timingInfo)
+{
+  CGameClient* gameClient = static_cast<CGameClient*>(kodiInstance);
+  if (gameClient == nullptr || timingInfo == nullptr)
+    return;
+
+  if (!std::isfinite(timingInfo->fps) || timingInfo->fps <= 0.0 ||
+      !std::isfinite(timingInfo->sample_rate) || timingInfo->sample_rate <= 0.0)
+  {
+    CLog::Log(LOGERROR, "GAME: Invalid timing info: FPS = {:f}, sample rate = {:f}",
+              timingInfo->fps, timingInfo->sample_rate);
+    return;
+  }
+
+  gameClient->m_framerate = timingInfo->fps;
+  gameClient->m_samplerate = timingInfo->sample_rate;
+  gameClient->Streams().SetGameTiming(*timingInfo);
+}
+
+KODI_GAME_STREAM_HANDLE CGameClient::cb_open_stream(KODI_HANDLE kodiInstance,
+                                                    const game_stream_properties* properties)
+{
+  if (properties == nullptr)
+    return nullptr;
+
+  CGameClient* gameClient = static_cast<CGameClient*>(kodiInstance);
+  if (gameClient == nullptr)
+    return nullptr;
+
+  return gameClient->Streams().OpenStream(*properties);
+}
+
+bool CGameClient::cb_get_stream_buffer(KODI_HANDLE kodiInstance,
+                                       KODI_GAME_STREAM_HANDLE stream,
+                                       unsigned int width,
+                                       unsigned int height,
+                                       game_stream_buffer* buffer)
+{
+  if (buffer == nullptr)
+    return false;
+
+  IGameClientStream* gameClientStream = static_cast<IGameClientStream*>(stream);
+  if (gameClientStream == nullptr)
+    return false;
+
+  return gameClientStream->GetBuffer(width, height, *buffer);
+}
+
+void CGameClient::cb_add_stream_data(KODI_HANDLE kodiInstance,
+                                     KODI_GAME_STREAM_HANDLE stream,
+                                     const game_stream_packet* packet)
+{
+  if (packet == nullptr)
+    return;
+
+  IGameClientStream* gameClientStream = static_cast<IGameClientStream*>(stream);
+  if (gameClientStream == nullptr)
+    return;
+
+  gameClientStream->AddData(*packet);
+}
+
+void CGameClient::cb_release_stream_buffer(KODI_HANDLE kodiInstance,
+                                           KODI_GAME_STREAM_HANDLE stream,
+                                           game_stream_buffer* buffer)
+{
+  if (buffer == nullptr)
+    return;
+
+  IGameClientStream* gameClientStream = static_cast<IGameClientStream*>(stream);
+  if (gameClientStream == nullptr)
+    return;
+
+  gameClientStream->ReleaseBuffer(*buffer);
+}
+
+void CGameClient::cb_close_stream(KODI_HANDLE kodiInstance, KODI_GAME_STREAM_HANDLE stream)
+{
+  CGameClient* gameClient = static_cast<CGameClient*>(kodiInstance);
+  if (gameClient == nullptr)
+    return;
+
+  IGameClientStream* gameClientStream = static_cast<IGameClientStream*>(stream);
+  if (gameClientStream == nullptr)
+    return;
+
+  gameClient->Streams().CloseStream(gameClientStream);
+}
+
+game_proc_address_t CGameClient::cb_hw_get_proc_address(KODI_HANDLE kodiInstance, const char* sym)
+{
+  CGameClient* gameClient = static_cast<CGameClient*>(kodiInstance);
+  if (!gameClient)
+    return nullptr;
+
+  return gameClient->Streams().GetHwProcedureAddress(sym);
+}
+
+bool CGameClient::cb_input_event(KODI_HANDLE kodiInstance, const game_input_event* event)
+{
+  CGameClient* gameClient = static_cast<CGameClient*>(kodiInstance);
+  if (!gameClient)
+    return false;
+
+  if (event == nullptr)
+    return false;
+
+  return gameClient->Input().ReceiveInputEvent(*event);
+}
+
+void CGameClient::cb_rc_on_game_loaded(KODI_HANDLE kodiInstance, const game_rc_game_loaded* data)
+{
+  CGameClient* gameClient = static_cast<CGameClient*>(kodiInstance);
+  if (gameClient == nullptr || data == nullptr)
+    return;
+
+  gameClient->Cheevos().OnGameLoaded(*data);
+}
+
+void CGameClient::cb_rc_on_achievement_triggered(KODI_HANDLE kodiInstance,
+                                                 const game_rc_achievement_triggered* data)
+{
+  CGameClient* gameClient = static_cast<CGameClient*>(kodiInstance);
+  if (gameClient == nullptr || data == nullptr)
+    return;
+
+  gameClient->Cheevos().OnAchievementTriggered(*data);
+}
+
+void CGameClient::cb_rc_on_game_completed(KODI_HANDLE kodiInstance,
+                                          const char* title,
+                                          bool hardcore)
+{
+  CGameClient* gameClient = static_cast<CGameClient*>(kodiInstance);
+  if (gameClient == nullptr)
+    return;
+
+  gameClient->Cheevos().OnGameCompleted(title != nullptr ? title : "", hardcore);
+}
+
+void CGameClient::cb_rc_on_rich_presence_updated(KODI_HANDLE kodiInstance, const char* evaluation)
+{
+  CGameClient* gameClient = static_cast<CGameClient*>(kodiInstance);
+  if (gameClient == nullptr)
+    return;
+
+  gameClient->Cheevos().OnRichPresenceUpdated(evaluation != nullptr ? evaluation : "");
+}
+
+void CGameClient::cb_rc_on_login_result(KODI_HANDLE kodiInstance, const game_rc_login_result* data)
+{
+  CGameClient* gameClient = static_cast<CGameClient*>(kodiInstance);
+  if (gameClient == nullptr || data == nullptr)
+    return;
+
+  gameClient->Cheevos().OnLoginResult(*data);
+}
+
+void CGameClient::cb_rc_on_achievement_progress(KODI_HANDLE kodiInstance,
+                                                const game_rc_achievement_progress* progress,
+                                                unsigned int count)
+{
+  CGameClient* gameClient = static_cast<CGameClient*>(kodiInstance);
+  if (gameClient == nullptr)
+    return;
+
+  // A null array with a non-zero count would be the add-on misbehaving
+  if (progress == nullptr)
+    count = 0;
+
+  gameClient->Cheevos().OnAchievementProgress(progress, count);
+}
+
+void CGameClient::cb_rc_on_server_error(KODI_HANDLE kodiInstance,
+                                        const char* message,
+                                        const char* api)
+{
+  CGameClient* gameClient = static_cast<CGameClient*>(kodiInstance);
+  if (gameClient == nullptr)
+    return;
+
+  gameClient->Cheevos().OnServerError(message != nullptr ? message : "", api != nullptr ? api : "");
+}
+
+void CGameClient::cb_rc_on_connection_changed(KODI_HANDLE kodiInstance, bool connected)
+{
+  CGameClient* gameClient = static_cast<CGameClient*>(kodiInstance);
+  if (gameClient == nullptr)
+    return;
+
+  gameClient->Cheevos().OnConnectionChanged(connected);
+}
+
+void CGameClient::cb_rc_on_challenge_indicator(KODI_HANDLE kodiInstance,
+                                               const game_rc_achievement_challenge* data,
+                                               bool show)
+{
+  CGameClient* gameClient = static_cast<CGameClient*>(kodiInstance);
+  if (gameClient == nullptr || data == nullptr)
+    return;
+
+  gameClient->Cheevos().OnChallengeIndicator(*data, show);
+}
+
+void CGameClient::cb_rc_on_achievement_progress_show(
+    KODI_HANDLE kodiInstance, const game_rc_achievement_progress_indicator* data)
+{
+  CGameClient* gameClient = static_cast<CGameClient*>(kodiInstance);
+  if (gameClient == nullptr || data == nullptr)
+    return;
+
+  gameClient->Cheevos().OnAchievementProgressIndicator(*data, true);
+}
+
+void CGameClient::cb_rc_on_achievement_progress_update(
+    KODI_HANDLE kodiInstance, const game_rc_achievement_progress_indicator* data)
+{
+  CGameClient* gameClient = static_cast<CGameClient*>(kodiInstance);
+  if (gameClient == nullptr || data == nullptr)
+    return;
+
+  // An update to an indicator that was never shown is still one to show
+  gameClient->Cheevos().OnAchievementProgressIndicator(*data, true);
+}
+
+void CGameClient::cb_rc_on_achievement_progress_hide(
+    KODI_HANDLE kodiInstance, const game_rc_achievement_progress_indicator* data)
+{
+  CGameClient* gameClient = static_cast<CGameClient*>(kodiInstance);
+  if (gameClient == nullptr || data == nullptr)
+    return;
+
+  gameClient->Cheevos().OnAchievementProgressIndicator(*data, false);
+}
+
+void CGameClient::cb_rc_on_leaderboard_started(KODI_HANDLE kodiInstance,
+                                               const game_rc_leaderboard* data)
+{
+  CGameClient* gameClient = static_cast<CGameClient*>(kodiInstance);
+  if (gameClient == nullptr || data == nullptr)
+    return;
+
+  gameClient->Cheevos().OnLeaderboardStarted(*data);
+}
+
+void CGameClient::cb_rc_on_leaderboard_failed(KODI_HANDLE kodiInstance,
+                                              const game_rc_leaderboard* data)
+{
+  CGameClient* gameClient = static_cast<CGameClient*>(kodiInstance);
+  if (gameClient == nullptr || data == nullptr)
+    return;
+
+  gameClient->Cheevos().OnLeaderboardFailed(*data);
+}
+
+void CGameClient::cb_rc_on_leaderboard_submitted(KODI_HANDLE kodiInstance,
+                                                 const game_rc_leaderboard* data)
+{
+  CGameClient* gameClient = static_cast<CGameClient*>(kodiInstance);
+  if (gameClient == nullptr || data == nullptr)
+    return;
+
+  gameClient->Cheevos().OnLeaderboardSubmitted(*data);
+}
+
+void CGameClient::cb_rc_on_leaderboard_tracker_show(KODI_HANDLE kodiInstance,
+                                                    const game_rc_leaderboard_tracker* data)
+{
+  CGameClient* gameClient = static_cast<CGameClient*>(kodiInstance);
+  if (gameClient == nullptr || data == nullptr)
+    return;
+
+  gameClient->Cheevos().OnLeaderboardTracker(*data, true);
+}
+
+void CGameClient::cb_rc_on_leaderboard_tracker_update(KODI_HANDLE kodiInstance,
+                                                      const game_rc_leaderboard_tracker* data)
+{
+  CGameClient* gameClient = static_cast<CGameClient*>(kodiInstance);
+  if (gameClient == nullptr || data == nullptr)
+    return;
+
+  // An update to a tracker that was never shown is still a tracker to show
+  gameClient->Cheevos().OnLeaderboardTracker(*data, true);
+}
+
+void CGameClient::cb_rc_on_leaderboard_tracker_hide(KODI_HANDLE kodiInstance,
+                                                    const game_rc_leaderboard_tracker* data)
+{
+  CGameClient* gameClient = static_cast<CGameClient*>(kodiInstance);
+  if (gameClient == nullptr || data == nullptr)
+    return;
+
+  gameClient->Cheevos().OnLeaderboardTracker(*data, false);
+}
+
+void CGameClient::cb_rc_on_leaderboard_scoreboard(KODI_HANDLE kodiInstance,
+                                                  const game_rc_leaderboard_scoreboard* data)
+{
+  CGameClient* gameClient = static_cast<CGameClient*>(kodiInstance);
+  if (gameClient == nullptr || data == nullptr)
+    return;
+
+  gameClient->Cheevos().OnLeaderboardScoreboard(*data);
+}
+
+void CGameClient::cb_rc_on_reset(KODI_HANDLE kodiInstance)
+{
+  CGameClient* gameClient = static_cast<CGameClient*>(kodiInstance);
+  if (gameClient == nullptr)
+    return;
+
+  gameClient->Cheevos().OnReset();
+}
+
+void CGameClient::cb_rc_on_subset_completed(KODI_HANDLE kodiInstance, const char* title)
+{
+  CGameClient* gameClient = static_cast<CGameClient*>(kodiInstance);
+  if (gameClient == nullptr)
+    return;
+
+  gameClient->Cheevos().OnSubsetCompleted(title != nullptr ? title : "");
+}
+
+std::pair<std::string, std::string> CGameClient::ParseLibretroName(const std::string& addonName)
+{
+  std::string emulatorName;
+  std::string platforms;
+
+  // libretro has a de-facto standard for naming their cores. If the
+  // core emulates one or more platforms, then the format is:
+  //
+  //   "Platforms (Emulator name)"
+  //
+  // Otherwise, the format is just the name with no platforms:
+  //
+  //   "Emulator name"
+  //
+  // The has been observed for all 130 cores we package.
+  //
+  size_t beginPos = addonName.find('(');
+  size_t endPos = addonName.find(')');
+
+  if (beginPos != std::string::npos && endPos != std::string::npos && beginPos < endPos)
+  {
+    emulatorName = addonName.substr(beginPos + 1, endPos - beginPos - 1);
+    platforms = addonName.substr(0, beginPos);
+    StringUtils::TrimRight(platforms);
+  }
+  else
+  {
+    emulatorName = addonName;
+    platforms.clear();
+  }
+
+  return std::make_pair(emulatorName, platforms);
+}
