@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Install Kodi OS
+Comment=Install Kodi OS to an internal drive
+Exec=calamares
+Icon=kodi
+Terminal=false
+Categories=System;Settings;
