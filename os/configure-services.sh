@@ -7,7 +7,9 @@ for service in \
   kodi-os-firstboot.service \
   kodi-os-gaming-init.service \
   kodi-os-controller-init.service \
+  kodi-os-device-watch.service \
   kodi-os-network-init.service \
+  kodi-os-network-watch.service \
   kodi-os-healthcheck.service \
   kodi-os-session.service \
   kodi-os-recovery.service \
