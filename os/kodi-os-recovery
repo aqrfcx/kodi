@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+clear || true
+printf '%s\n' 'Kodi OS Recovery' '' \
+  'This mode is intentionally non-destructive.' \
+  'It does not repartition or erase disks automatically.' ''
+
+printf '%s\n' '1) Show storage' '2) Show network' '3) Check Kodi services' '4) Reboot' '5) Power off'
+printf '%s' 'Select: '
+read -r choice || exit 0
+
+case "$choice" in
+  1) lsblk -e7 -o NAME,SIZE,FSTYPE,FSVER,LABEL,MOUNTPOINTS,MODEL,RO,TYPE ; read -r -p 'Press Enter...' _ ;;
+  2) nmcli device status 2>/dev/null || ip -br link ; read -r -p 'Press Enter...' _ ;;
+  3) systemctl --no-pager --full status kodi-os-session.service kodi-os-firstboot.service 2>&1 || true ; read -r -p 'Press Enter...' _ ;;
+  4) systemctl reboot ;;
+  5) systemctl poweroff ;;
+  *) exit 0 ;;
+esac
