@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+fail() { echo "Kodi OS image validation failed: $*" >&2; exit 1; }
+
+id kodi >/dev/null 2>&1 || fail "kodi user is missing"
+command -v kodi >/dev/null 2>&1 || fail "kodi executable is missing"
+command -v systemctl >/dev/null 2>&1 || fail "systemctl is missing"
+[[ -f /etc/systemd/system/kodi-os.target ]] || fail "kodi-os.target is missing"
+[[ -f /etc/systemd/system/kodi-os-session.service ]] || fail "Kodi session service is missing"
+[[ -x /usr/sbin/kodi-os-session-wrapper ]] || fail "Kodi session wrapper is missing or not executable"
+[[ -x /usr/sbin/kodi-os-firstboot ]] || fail "first-boot helper is missing or not executable"
+
+systemctl enable kodi-os.target >/dev/null 2>&1 || fail "could not enable kodi-os.target"
+systemctl enable kodi-os-session.service >/dev/null 2>&1 || fail "could not enable Kodi session service"
+systemctl enable kodi-os-firstboot.service >/dev/null 2>&1 || fail "could not enable first-boot service"
+
+# The image must contain a real EFI bootloader package and Kodi OS package set.
+dpkg-query -W grub-efi-amd64 >/dev/null 2>&1 || fail "grub-efi-amd64 package is missing"
+dpkg-query -W kodi >/dev/null 2>&1 || fail "kodi package is missing"
+
+echo "Kodi OS chroot validation: PASS"
