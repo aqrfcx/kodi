@@ -46,16 +46,19 @@ mkdir -p config/package-lists \
 cp "$OS_DIR/package-lists/kodi-os.list.chroot" config/package-lists/
 cp "$OS_DIR/kodi-os-session.service" config/includes.chroot/etc/systemd/system/
 cp "$OS_DIR/kodi-os-firstboot.service" config/includes.chroot/etc/systemd/system/
+cp "$OS_DIR/kodi-os-recovery.service" config/includes.chroot/etc/systemd/system/
 cp "$OS_DIR/systemd/kodi-os.target" config/includes.chroot/etc/systemd/system/
 cp "$OS_DIR/firstboot.sh" config/includes.chroot/usr/sbin/kodi-os-firstboot
 cp "$OS_DIR/kodi-os-hardware.sh" config/includes.chroot/usr/sbin/kodi-os-hardware
 cp "$OS_DIR/kodi-os-session-wrapper.sh" config/includes.chroot/usr/sbin/kodi-os-session-wrapper
+cp "$OS_DIR/kodi-os-recovery" config/includes.chroot/usr/sbin/kodi-os-recovery
 cp "$OS_DIR/configure-services.sh" config/hooks/live/0200-enable-kodi-os.hook.chroot
 cp "$OS_DIR/hooks/0300-validate-kodi-os.hook.chroot" config/hooks/live/0300-validate-kodi-os.hook.chroot
 cp "$OS_DIR/hooks/0310-validate-boot-assets.hook.chroot" config/hooks/live/0310-validate-boot-assets.hook.chroot
 chmod +x config/includes.chroot/usr/sbin/kodi-os-firstboot \
   config/includes.chroot/usr/sbin/kodi-os-hardware \
   config/includes.chroot/usr/sbin/kodi-os-session-wrapper \
+  config/includes.chroot/usr/sbin/kodi-os-recovery \
   config/hooks/live/0200-enable-kodi-os.hook.chroot \
   config/hooks/live/0300-validate-kodi-os.hook.chroot \
   config/hooks/live/0310-validate-boot-assets.hook.chroot
