@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for removable storage changes
+
+[Path]
+PathChanged=/run/udev/data
+Unit=kodi-os-storage-mount.service
+
+[Install]
+WantedBy=multi-user.target
