@@ -60,6 +60,7 @@ cp "$OS_DIR/kodi-os-storage-init" config/includes.chroot/usr/sbin/kodi-os-storag
 cp "$OS_DIR/kodi-os-gaming-init" config/includes.chroot/usr/sbin/kodi-os-gaming-init
 cp "$OS_DIR/kodi-os-controller-init" config/includes.chroot/usr/sbin/kodi-os-controller-init
 cp "$OS_DIR/kodi-os-network-init" config/includes.chroot/usr/sbin/kodi-os-network-init
+cp "$OS_DIR/kodi-os-app-launcher" config/includes.chroot/usr/sbin/kodi-os-app-launcher
 cp "$OS_DIR/includes.chroot/etc/default/grub.d/99-kodi-os.cfg" config/includes.chroot/etc/default/grub.d/99-kodi-os.cfg
 cp "$OS_DIR/configure-services.sh" config/hooks/live/0200-enable-kodi-os.hook.chroot
 cp "$OS_DIR/hooks/0300-validate-kodi-os.hook.chroot" config/hooks/live/0300-validate-kodi-os.hook.chroot
@@ -73,6 +74,7 @@ chmod +x config/includes.chroot/usr/sbin/kodi-os-firstboot \
   config/includes.chroot/usr/sbin/kodi-os-gaming-init \
   config/includes.chroot/usr/sbin/kodi-os-controller-init \
   config/includes.chroot/usr/sbin/kodi-os-network-init \
+  config/includes.chroot/usr/sbin/kodi-os-app-launcher \
   config/hooks/live/0200-enable-kodi-os.hook.chroot \
   config/hooks/live/0300-validate-kodi-os.hook.chroot \
   config/hooks/live/0310-validate-boot-assets.hook.chroot \
