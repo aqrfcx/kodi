@@ -16,9 +16,11 @@ Environment=XDG_CONFIG_HOME=/home/kodi/.config
 Environment=XDG_DATA_HOME=/home/kodi/.local/share
 Environment=XDG_CACHE_HOME=/home/kodi/.cache
 Environment=LIBSEAT_BACKEND=logind
-ExecStart=/usr/bin/startx /usr/bin/kodi -- :0 vt1 -nolisten tcp -nocursor
-Restart=on-failure
-RestartSec=2
+ExecStart=/usr/sbin/kodi-os-session-wrapper
+Restart=always
+RestartSec=3
+StartLimitIntervalSec=60
+StartLimitBurst=10
 TTYPath=/dev/tty1
 TTYReset=yes
 TTYVHangup=yes
@@ -28,4 +30,4 @@ StandardOutput=journal
 StandardError=journal
 
 [Install]
-WantedBy=graphical.target
+WantedBy=kodi-os.target
