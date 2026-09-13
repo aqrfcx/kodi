@@ -1,0 +1,8 @@
+[Unit]
+Description=Kodi OS game catalog refresh
+After=kodi-os-storage-init.service
+Wants=kodi-os-storage-init.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/kodi-os-game-catalog
