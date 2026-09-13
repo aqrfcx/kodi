@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# Conservative updater for the installed Kodi OS. It never performs a
+# distribution upgrade automatically and requires an explicit invocation.
+exec 9>/run/kodi-os-update.lock
+flock -n 9 || { echo 'Another update is already running.' >&2; exit 2; }
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get -y --no-install-recommends upgrade
+systemctl daemon-reload
+systemctl reset-failed || true
+printf '%s\n' "$(date -Is) update-complete" > /var/lib/kodi-os-last-update
