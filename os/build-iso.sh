@@ -47,6 +47,9 @@ install -m 0644 "$KEYRING" "$HOST_KEYRING"
 
 # This Ubuntu live-build version does not support --debootstrap-options.
 # Keep lb config portable and put the verified keyring in the standard path.
+# Bookworm uses deb.debian.org/debian-security with the bookworm-security
+# suite; older live-build defaults still point at security.debian.org and
+# generate the obsolete bookworm/updates path.
 lb config \
   --ignore-system-defaults \
   --mode debian \
@@ -56,6 +59,10 @@ lb config \
   --mirror-bootstrap http://deb.debian.org/debian \
   --mirror-chroot http://deb.debian.org/debian \
   --mirror-binary http://deb.debian.org/debian \
+  --mirror-chroot-security http://deb.debian.org/debian-security \
+  --mirror-binary-security http://deb.debian.org/debian-security \
+  --parent-mirror-chroot-security http://deb.debian.org/debian-security \
+  --parent-mirror-binary-security http://deb.debian.org/debian-security \
   --binary-images iso-hybrid \
   --bootappend-live "boot=live components quiet splash" \
   --iso-application "Kodi OS" \
