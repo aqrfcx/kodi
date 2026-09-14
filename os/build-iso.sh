@@ -78,7 +78,6 @@ find config/includes.chroot/usr/sbin -type f -exec chmod 0755 {} +
 if [[ -d "$OS_DIR/hooks/live" ]]; then
   rsync -a "$OS_DIR/hooks/live/" config/hooks/live/
   find config/hooks/live -type f -exec chmod 0755 {} +
-done
 fi
 
 # Build the ISO. Source-building Kodi is intentionally not mixed into the
