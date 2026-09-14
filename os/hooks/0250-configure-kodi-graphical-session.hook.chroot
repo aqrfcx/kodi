@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# Kodi needs a real graphical session. The previous image enabled
+# kodi-os-session.service directly on tty1, but that service has no X11/Wayland
+# server and therefore starts Kodi without DISPLAY. Use LightDM as the display
+# manager and autologin the appliance user into a dedicated Kodi X session.
+
+install -d -m 0755 /etc/lightdm/lightdm.conf.d /usr/share/xsessions /etc/systemd/system/lightdm.service.d
+
+cat > /etc/lightdm/lightdm.conf.d/50-kodi-os.conf <<'EOF'
+[LightDM]
+logind-check-graphical=true
+
+[Seat:*]
+autologin-user=kodi
+autologin-user-timeout=0
+user-session=kodi-os
+greeter-hide-users=true
+greeter-show-manual-login=false
+EOF
+
+cat > /usr/share/xsessions/kodi-os.desktop <<'EOF'
+[Desktop Entry]
+Name=Kodi OS
+Comment=Kodi OS fullscreen media center
+Exec=/usr/sbin/kodi-os-session-wrapper
+TryExec=/usr/sbin/kodi-os-session-wrapper
+Type=Application
+DesktopNames=Kodi
+EOF
+
+cat > /etc/systemd/system/lightdm.service.d/kodi-os.conf <<'EOF'
+[Unit]
+Requires=kodi-os-firstboot.service
+After=kodi-os-firstboot.service
+EOF
+
+# The graphical target must be provided by LightDM; do not run the old tty
+# session service in parallel with the display manager.
+systemctl disable kodi-os-session.service >/dev/null 2>&1 || true
+systemctl enable lightdm.service >/dev/null 2>&1
+
+echo "Kodi OS graphical session configuration: PASS"
