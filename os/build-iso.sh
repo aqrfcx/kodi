@@ -20,11 +20,9 @@ command -v dpkg-deb >/dev/null 2>&1 || { echo "ERROR: dpkg-deb is required" >&2;
 
 mkdir -p "$BUILD_DIR" "$ARTIFACT_DIR"
 
-# Ubuntu 22.04 ships an old live-build which uses Ubuntu-style security
-# suites. When asked to build Debian Bookworm it generates
-# "bookworm/updates", which no longer exists. Use Debian's Bookworm
-# live-build package instead; it knows that the security suite is
-# "bookworm-security".
+# Ubuntu 22.04 ships an old live-build which generates the obsolete
+# "bookworm/updates" security suite. Use Debian's Bookworm live-build
+# package for the build tooling itself.
 LB_VERSION_REQUIRED="1:20230502"
 LB_DEB_DIR="$BUILD_DIR/live-build-tool"
 LB_DEB="$LB_DEB_DIR/live-build_20230502_all.deb"
@@ -79,15 +77,11 @@ lb config \
   --archive-areas "main contrib non-free non-free-firmware" \
   --mirror-bootstrap http://deb.debian.org/debian \
   --mirror-chroot http://deb.debian.org/debian \
-  --mirror-chroot-security http://deb.debian.org/debian-security \
   --mirror-binary http://deb.debian.org/debian \
-  --mirror-binary-security http://deb.debian.org/debian-security \
   --parent-mirror-bootstrap http://deb.debian.org/debian \
   --parent-mirror-chroot http://deb.debian.org/debian \
-  --parent-mirror-chroot-security http://deb.debian.org/debian-security \
   --parent-mirror-binary http://deb.debian.org/debian \
-  --parent-mirror-binary-security http://deb.debian.org/debian-security \
-  --security true \
+  --security false \
   --updates true \
   --binary-images iso-hybrid \
   --bootappend-live "boot=live components quiet splash" \
@@ -100,10 +94,18 @@ mkdir -p \
   config/includes.chroot/etc/systemd/system \
   config/includes.chroot/etc/default/grub.d \
   config/includes.chroot/etc/calamares \
+  config/includes.chroot/etc/apt/sources.list.d \
   config/includes.chroot/usr/sbin \
   config/includes.chroot/opt/kodi-os \
   config/includes.chroot/usr/share/kodi/addons \
   config/hooks/live
+
+# Keep the final installed system pointed at Debian's real Bookworm security
+# suite. live-build itself cannot express this correctly in its Bookworm
+# configuration and otherwise generates the obsolete "bookworm/updates".
+cat > config/includes.chroot/etc/apt/sources.list.d/debian-security.list <<'EOF'
+deb http://deb.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
+EOF
 
 cp "$OS_DIR/package-lists/kodi-os.list.chroot" config/package-lists/
 cp "$OS_DIR/systemd/kodi-os.target" config/includes.chroot/etc/systemd/system/
