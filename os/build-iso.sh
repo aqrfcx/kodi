@@ -69,6 +69,23 @@ lb config \
   --iso-publisher "Kodi OS Project" \
   --iso-volume "KODI_OS"
 
+# Compatibility fix for the live-build version shipped by Ubuntu 22.04.
+# It still writes the obsolete Bookworm security suite as bookworm/updates,
+# which now returns HTTP 404. Normalize every generated live-build config
+# entry before the chroot stage creates /etc/apt/sources.list.
+while IFS= read -r -d '' cfg; do
+  sed -i \
+    -e 's#bookworm/updates#bookworm-security#g' \
+    -e 's#security\\.debian\\.org#deb.debian.org/debian-security#g' \
+    "$cfg"
+done < <(find config -type f -print0)
+
+if grep -Rqs 'bookworm/updates' config; then
+  echo "ERROR: obsolete Bookworm security suite remains in live-build config" >&2
+  grep -Rns 'bookworm/updates' config >&2 || true
+  exit 1
+fi
+
 mkdir -p \
   config/package-lists \
   config/includes.chroot/etc/systemd/system \
