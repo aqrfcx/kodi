@@ -42,9 +42,9 @@ fi
 [[ -s "$KEYRING" ]] || { echo "ERROR: Debian archive keyring was not extracted" >&2; exit 1; }
 install -m 0644 "$KEYRING" "$HOST_KEYRING"
 
-# Ubuntu's live-build can generate the obsolete Bookworm security suite
-# (bookworm/updates). Disable its security archive for the build; the final
-# image gets the current bookworm-security repository below.
+# Ubuntu's live-build defaults are not compatible with Debian Bookworm's
+# current security suite. Disable live-build's generated security archive;
+# the installed image receives bookworm-security explicitly below.
 lb config \
   --ignore-system-defaults \
   --mode debian \
@@ -61,30 +61,36 @@ lb config \
   --iso-publisher "Kodi OS Project" \
   --iso-volume "KODI_OS"
 
-# Some Ubuntu live-build releases ignore --security false and persist their
-# old security mirror variables in config/bootstrap. Remove those variables
-# explicitly so chroot apt never sees bookworm/updates.
-if [[ -f config/bootstrap ]]; then
-  sed -i \
-    -e '/^LB_\(PARENT_\)\?MIRROR_\(CHROOT\|BINARY\)_SECURITY=/d' \
-    -e '/^LB_SECURITY=/d' \
-    config/bootstrap
-fi
+# Some older Ubuntu live-build releases regenerate the security variables
+# when lb build starts. Keep them explicitly disabled instead of deleting
+# them, otherwise the live-build defaults can turn security back on.
+for cfg in config/bootstrap config/common config/chroot; do
+  if [[ -f "$cfg" ]]; then
+    sed -i \
+      -e '/^LB_\(PARENT_\)\?MIRROR_\(CHROOT\|BINARY\)_SECURITY=/d' \
+      -e '/^LB_SECURITY=/d' \
+      -e '/bookworm\/updates/d' \
+      -e '/security\.debian\.org/d' \
+      -e '/deb\.debian\.org\/debian-security/d' \
+      -e '/bookworm-security/d' \
+      "$cfg"
+    cat >> "$cfg" <<'EOF'
 
-# Remove any generated Debian security repository entries from live-build's
-# own config. The final installed system receives the correct repository.
-while IFS= read -r -d '' cfg; do
-  sed -i \
-    -e '/bookworm\/updates/d' \
-    -e '/security\.debian\.org/d' \
-    -e '/deb\.debian\.org\/debian-security/d' \
-    -e '/bookworm-security/d' \
-    "$cfg"
-done < <(find config -type f -print0)
+# Debian Bookworm security uses the bookworm-security suite. The old
+# live-build Ubuntu defaults use bookworm/updates, so do not generate a
+# security archive during the build.
+LB_SECURITY="false"
+LB_MIRROR_CHROOT_SECURITY=""
+LB_MIRROR_BINARY_SECURITY=""
+LB_PARENT_MIRROR_CHROOT_SECURITY=""
+LB_PARENT_MIRROR_BINARY_SECURITY=""
+EOF
+  fi
+done
 
-if grep -RqsE 'bookworm/updates|security\.debian\.org|debian-security|bookworm-security' config; then
-  echo "ERROR: Debian security repository remains in live-build config" >&2
-  grep -RnsE 'bookworm/updates|security\.debian\.org|debian-security|bookworm-security' config >&2 || true
+if grep -RqsE 'bookworm/updates|security\.debian\.org' config; then
+  echo "ERROR: obsolete Debian security repository remains in live-build config" >&2
+  grep -RnsE 'bookworm/updates|security\.debian\.org' config >&2 || true
   exit 1
 fi
 
@@ -132,6 +138,7 @@ if [[ -d "$OS_DIR/hooks/live" ]]; then
   find config/hooks/live -type f -exec chmod 0755 {} +
 fi
 
+set -o pipefail
 lb build 2>&1 | tee "$BUILD_DIR/live-build.log"
 
 ISO="$(find "$LB_DIR" -maxdepth 1 -type f -name '*.iso' -print -quit)"
