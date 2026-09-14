@@ -1,5 +1,5 @@
 [Unit]
 Description=Kodi OS appliance target
-Requires=graphical.target kodi-os-session.service
-After=graphical.target
+Requires=graphical.target lightdm.service
+After=graphical.target lightdm.service
 AllowIsolate=yes
