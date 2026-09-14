@@ -58,15 +58,13 @@ firmware-linux-free
 firmware-iwlwifi
 firmware-realtek
 firmware-atheros
-firmware-mediatek
 firmware-brcm80211
 flatpak
 wine
 gamemode
 retroarch
-pcsx2
+x11-xserver-utils
 calamares
-xrandr
 chromium
 firefox-esr
 thunar
