@@ -25,6 +25,9 @@ lb config \
   --distribution bookworm \
   --architectures amd64 \
   --archive-areas "main contrib non-free non-free-firmware" \
+  --mirror-bootstrap http://deb.debian.org/debian \
+  --mirror-chroot http://deb.debian.org/debian \
+  --mirror-binary http://deb.debian.org/debian \
   --binary-images iso-hybrid \
   --bootappend-live "boot=live components quiet splash" \
   --iso-application "Kodi OS" \
@@ -75,6 +78,7 @@ find config/includes.chroot/usr/sbin -type f -exec chmod 0755 {} +
 if [[ -d "$OS_DIR/hooks/live" ]]; then
   rsync -a "$OS_DIR/hooks/live/" config/hooks/live/
   find config/hooks/live -type f -exec chmod 0755 {} +
+done
 fi
 
 # Build the ISO. Source-building Kodi is intentionally not mixed into the
