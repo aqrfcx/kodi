@@ -23,14 +23,13 @@ rm -rf "$LB_DIR"
 mkdir -p "$LB_DIR"
 cd "$LB_DIR"
 
-# Ubuntu 22.04 ships an older Debian archive keyring. The current Debian
-# Bookworm Release is signed by a key that is not present in that keyring.
-# Fetch the official Bookworm archive keyring package and use its keyring
-# explicitly for debootstrap. This also makes the build independent of
-# /etc/live/build.conf on Ubuntu/WSL hosts.
+# Ubuntu 22.04 ships an older Debian archive keyring. Fetch the verified
+# Bookworm keyring and install it where this live-build/debootstrap version
+# expects it. This avoids relying on the host's stale keyring.
 KEYRING_DIR="$BUILD_DIR/debian-keyring"
 KEYRING_DEB="$KEYRING_DIR/debian-archive-keyring_2023.3+deb12u2_all.deb"
 KEYRING="$KEYRING_DIR/usr/share/keyrings/debian-archive-keyring.gpg"
+HOST_KEYRING="/usr/share/keyrings/debian-archive-keyring.gpg"
 KEYRING_SHA256="f699e2f88dca05212f2a452b58475f2993cb6993dfbafb1d0205a3291eb8b4b8"
 
 if [[ ! -f "$KEYRING" ]]; then
@@ -44,7 +43,10 @@ if [[ ! -f "$KEYRING" ]]; then
 fi
 
 [[ -s "$KEYRING" ]] || { echo "ERROR: Debian archive keyring was not extracted" >&2; exit 1; }
+install -m 0644 "$KEYRING" "$HOST_KEYRING"
 
+# This Ubuntu live-build version does not support --debootstrap-options.
+# Keep lb config portable and put the verified keyring in the standard path.
 lb config \
   --ignore-system-defaults \
   --mode debian \
@@ -54,7 +56,6 @@ lb config \
   --mirror-bootstrap http://deb.debian.org/debian \
   --mirror-chroot http://deb.debian.org/debian \
   --mirror-binary http://deb.debian.org/debian \
-  --debootstrap-options "--keyring=$KEYRING" \
   --binary-images iso-hybrid \
   --bootappend-live "boot=live components quiet splash" \
   --iso-application "Kodi OS" \
@@ -74,42 +75,32 @@ mkdir -p \
 cp "$OS_DIR/package-lists/kodi-os.list.chroot" config/package-lists/
 cp "$OS_DIR/systemd/kodi-os.target" config/includes.chroot/etc/systemd/system/
 
-# Install all OS systemd units that are present. This keeps the builder robust
-# when a service is added or removed from the OS layer.
 for service in "$OS_DIR"/*.service "$OS_DIR"/*.timer "$OS_DIR"/*.path; do
   [[ -f "$service" ]] || continue
   cp "$service" config/includes.chroot/etc/systemd/system/
 done
 
-# Install executable OS helpers.
 for script in "$OS_DIR"/firstboot.sh "$OS_DIR"/kodi-os-* "$OS_DIR"/kodi-os-hardware.sh "$OS_DIR"/kodi-os-session-wrapper.sh; do
   [[ -f "$script" ]] || continue
   base="$(basename "$script")"
   cp "$script" "config/includes.chroot/usr/sbin/$base"
 done
 
-# Recovery configuration and installer assets.
 [[ -f "$OS_DIR/kodi-os-recovery-grub.cfg" ]] && cp "$OS_DIR/kodi-os-recovery-grub.cfg" config/includes.chroot/opt/kodi-os/
 [[ -d "$OS_DIR/calamares" ]] && rsync -a "$OS_DIR/calamares/" config/includes.chroot/etc/calamares/
 
-# Copy the Kodi Games plugin into the image.
 if [[ -d "$ROOT_DIR/addons/plugin.program.kodiosgames" ]]; then
   rm -rf config/includes.chroot/usr/share/kodi/addons/plugin.program.kodiosgames
   cp -a "$ROOT_DIR/addons/plugin.program.kodiosgames" config/includes.chroot/usr/share/kodi/addons/
 fi
 
-# Preserve executable permissions inside the chroot.
 find config/includes.chroot/usr/sbin -type f -exec chmod 0755 {} +
 
-# Optional live-build hooks shipped by the OS layer.
 if [[ -d "$OS_DIR/hooks/live" ]]; then
   rsync -a "$OS_DIR/hooks/live/" config/hooks/live/
   find config/hooks/live -type f -exec chmod 0755 {} +
 fi
 
-# Build the ISO. Source-building Kodi is intentionally not mixed into the
-# first image build; the default path uses the distro Kodi package for a
-# reproducible, testable appliance image.
 lb build 2>&1 | tee "$BUILD_DIR/live-build.log"
 
 ISO="$(find "$LB_DIR" -maxdepth 1 -type f -name '*.iso' -print -quit)"
