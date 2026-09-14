@@ -23,9 +23,6 @@ rm -rf "$LB_DIR"
 mkdir -p "$LB_DIR"
 cd "$LB_DIR"
 
-# Ubuntu 22.04 ships an older Debian archive keyring. Fetch the verified
-# Bookworm keyring and install it where this live-build/debootstrap version
-# expects it. This avoids relying on the host's stale keyring.
 KEYRING_DIR="$BUILD_DIR/debian-keyring"
 KEYRING_DEB="$KEYRING_DIR/debian-archive-keyring_2023.3+deb12u2_all.deb"
 KEYRING="$KEYRING_DIR/usr/share/keyrings/debian-archive-keyring.gpg"
@@ -45,11 +42,9 @@ fi
 [[ -s "$KEYRING" ]] || { echo "ERROR: Debian archive keyring was not extracted" >&2; exit 1; }
 install -m 0644 "$KEYRING" "$HOST_KEYRING"
 
-# Ubuntu's live-build is old enough to generate the obsolete Bookworm
-# security suite (bookworm/updates). Disable live-build's security archive
-# during the build, then add the correct bookworm-security source to the
-# resulting image below. This keeps the build itself functional while the
-# installed Kodi OS still has the Debian security repository enabled.
+# Ubuntu's live-build can generate the obsolete Bookworm security suite
+# (bookworm/updates). Disable its security archive for the build; the final
+# image gets the current bookworm-security repository below.
 lb config \
   --ignore-system-defaults \
   --mode debian \
@@ -66,17 +61,30 @@ lb config \
   --iso-publisher "Kodi OS Project" \
   --iso-volume "KODI_OS"
 
-# Normalize any stale security URLs emitted by the host live-build config.
+# Some Ubuntu live-build releases ignore --security false and persist their
+# old security mirror variables in config/bootstrap. Remove those variables
+# explicitly so chroot apt never sees bookworm/updates.
+if [[ -f config/bootstrap ]]; then
+  sed -i \
+    -e '/^LB_\(PARENT_\)\?MIRROR_\(CHROOT\|BINARY\)_SECURITY=/d' \
+    -e '/^LB_SECURITY=/d' \
+    config/bootstrap
+fi
+
+# Remove any generated Debian security repository entries from live-build's
+# own config. The final installed system receives the correct repository.
 while IFS= read -r -d '' cfg; do
   sed -i \
-    -e 's#bookworm/updates#bookworm-security#g' \
-    -e 's#security\\.debian\\.org#deb.debian.org/debian-security#g' \
+    -e '/bookworm\/updates/d' \
+    -e '/security\.debian\.org/d' \
+    -e '/deb\.debian\.org\/debian-security/d' \
+    -e '/bookworm-security/d' \
     "$cfg"
 done < <(find config -type f -print0)
 
-if grep -Rqs 'bookworm/updates' config; then
-  echo "ERROR: obsolete Bookworm security suite remains in live-build config" >&2
-  grep -Rns 'bookworm/updates' config >&2 || true
+if grep -RqsE 'bookworm/updates|security\.debian\.org|debian-security|bookworm-security' config; then
+  echo "ERROR: Debian security repository remains in live-build config" >&2
+  grep -RnsE 'bookworm/updates|security\.debian\.org|debian-security|bookworm-security' config >&2 || true
   exit 1
 fi
 
@@ -91,7 +99,6 @@ mkdir -p \
   config/includes.chroot/usr/share/kodi/addons \
   config/hooks/live
 
-# Re-enable the current Debian Bookworm security repository in the final OS.
 cat > config/includes.chroot/etc/apt/sources.list.d/kodi-os-security.list <<'EOF'
 deb http://deb.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
 EOF
