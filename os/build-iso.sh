@@ -15,19 +15,46 @@ fi
 command -v lb >/dev/null 2>&1 || { echo "ERROR: live-build is required" >&2; exit 1; }
 command -v xorriso >/dev/null 2>&1 || { echo "ERROR: xorriso is required" >&2; exit 1; }
 command -v rsync >/dev/null 2>&1 || { echo "ERROR: rsync is required" >&2; exit 1; }
+command -v curl >/dev/null 2>&1 || { echo "ERROR: curl is required" >&2; exit 1; }
+command -v dpkg-deb >/dev/null 2>&1 || { echo "ERROR: dpkg-deb is required" >&2; exit 1; }
 
 mkdir -p "$BUILD_DIR" "$ARTIFACT_DIR"
 rm -rf "$LB_DIR"
 mkdir -p "$LB_DIR"
 cd "$LB_DIR"
 
+# Ubuntu 22.04 ships an older Debian archive keyring. The current Debian
+# Bookworm Release is signed by a key that is not present in that keyring.
+# Fetch the official Bookworm archive keyring package and use its keyring
+# explicitly for debootstrap. This also makes the build independent of
+# /etc/live/build.conf on Ubuntu/WSL hosts.
+KEYRING_DIR="$BUILD_DIR/debian-keyring"
+KEYRING_DEB="$KEYRING_DIR/debian-archive-keyring_2023.3+deb12u2_all.deb"
+KEYRING="$KEYRING_DIR/usr/share/keyrings/debian-archive-keyring.gpg"
+KEYRING_SHA256="f699e2f88dca05212f2a452b58475f2993cb6993dfbafb1d0205a3291eb8b4b8"
+
+if [[ ! -f "$KEYRING" ]]; then
+  rm -rf "$KEYRING_DIR"
+  mkdir -p "$KEYRING_DIR"
+  curl -fsSL \
+    "http://deb.debian.org/debian/pool/main/d/debian-archive-keyring/debian-archive-keyring_2023.3+deb12u2_all.deb" \
+    -o "$KEYRING_DEB"
+  printf '%s  %s\n' "$KEYRING_SHA256" "$KEYRING_DEB" | sha256sum -c -
+  dpkg-deb -x "$KEYRING_DEB" "$KEYRING_DIR"
+fi
+
+[[ -s "$KEYRING" ]] || { echo "ERROR: Debian archive keyring was not extracted" >&2; exit 1; }
+
 lb config \
+  --ignore-system-defaults \
+  --mode debian \
   --distribution bookworm \
   --architectures amd64 \
   --archive-areas "main contrib non-free non-free-firmware" \
   --mirror-bootstrap http://deb.debian.org/debian \
   --mirror-chroot http://deb.debian.org/debian \
   --mirror-binary http://deb.debian.org/debian \
+  --debootstrap-options "--keyring=$KEYRING" \
   --binary-images iso-hybrid \
   --bootappend-live "boot=live components quiet splash" \
   --iso-application "Kodi OS" \
