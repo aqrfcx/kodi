@@ -12,13 +12,42 @@ if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
   exit 1
 fi
 
-command -v lb >/dev/null 2>&1 || { echo "ERROR: live-build is required" >&2; exit 1; }
 command -v xorriso >/dev/null 2>&1 || { echo "ERROR: xorriso is required" >&2; exit 1; }
 command -v rsync >/dev/null 2>&1 || { echo "ERROR: rsync is required" >&2; exit 1; }
 command -v curl >/dev/null 2>&1 || { echo "ERROR: curl is required" >&2; exit 1; }
+command -v dpkg >/dev/null 2>&1 || { echo "ERROR: dpkg is required" >&2; exit 1; }
 command -v dpkg-deb >/dev/null 2>&1 || { echo "ERROR: dpkg-deb is required" >&2; exit 1; }
 
 mkdir -p "$BUILD_DIR" "$ARTIFACT_DIR"
+
+# Ubuntu 22.04 ships an old live-build which uses Ubuntu-style security
+# suites. When asked to build Debian Bookworm it generates
+# "bookworm/updates", which no longer exists. Use Debian's Bookworm
+# live-build package instead; it knows that the security suite is
+# "bookworm-security".
+LB_VERSION_REQUIRED="1:20230502"
+LB_DEB_DIR="$BUILD_DIR/live-build-tool"
+LB_DEB="$LB_DEB_DIR/live-build_20230502_all.deb"
+LB_DEB_SHA256="a863905724e7b69d45066ebab113cb6de12a11984349847ad49f6151c10f017d"
+LB_DEB_URL="http://deb.debian.org/debian/pool/main/l/live-build/live-build_20230502_all.deb"
+
+installed_lb_version="$(dpkg-query -W -f='${Version}' live-build 2>/dev/null || true)"
+if [[ "$installed_lb_version" != "$LB_VERSION_REQUIRED" ]]; then
+  rm -rf "$LB_DEB_DIR"
+  mkdir -p "$LB_DEB_DIR"
+  curl -fsSL "$LB_DEB_URL" -o "$LB_DEB"
+  printf '%s  %s\n' "$LB_DEB_SHA256" "$LB_DEB" | sha256sum -c -
+  dpkg -i "$LB_DEB"
+fi
+
+command -v lb >/dev/null 2>&1 || { echo "ERROR: live-build is required" >&2; exit 1; }
+
+actual_lb_version="$(dpkg-query -W -f='${Version}' live-build 2>/dev/null || true)"
+if [[ "$actual_lb_version" != "$LB_VERSION_REQUIRED" ]]; then
+  echo "ERROR: expected live-build $LB_VERSION_REQUIRED, got ${actual_lb_version:-missing}" >&2
+  exit 1
+fi
+
 rm -rf "$LB_DIR"
 mkdir -p "$LB_DIR"
 cd "$LB_DIR"
@@ -42,9 +71,6 @@ fi
 [[ -s "$KEYRING" ]] || { echo "ERROR: Debian archive keyring was not extracted" >&2; exit 1; }
 install -m 0644 "$KEYRING" "$HOST_KEYRING"
 
-# Ubuntu's live-build defaults are not compatible with Debian Bookworm's
-# current security suite. Disable live-build's generated security archive;
-# the installed image receives bookworm-security explicitly below.
 lb config \
   --ignore-system-defaults \
   --mode debian \
@@ -53,61 +79,31 @@ lb config \
   --archive-areas "main contrib non-free non-free-firmware" \
   --mirror-bootstrap http://deb.debian.org/debian \
   --mirror-chroot http://deb.debian.org/debian \
+  --mirror-chroot-security http://deb.debian.org/debian-security \
   --mirror-binary http://deb.debian.org/debian \
-  --security false \
+  --mirror-binary-security http://deb.debian.org/debian-security \
+  --parent-mirror-bootstrap http://deb.debian.org/debian \
+  --parent-mirror-chroot http://deb.debian.org/debian \
+  --parent-mirror-chroot-security http://deb.debian.org/debian-security \
+  --parent-mirror-binary http://deb.debian.org/debian \
+  --parent-mirror-binary-security http://deb.debian.org/debian-security \
+  --security true \
+  --updates true \
   --binary-images iso-hybrid \
   --bootappend-live "boot=live components quiet splash" \
   --iso-application "Kodi OS" \
   --iso-publisher "Kodi OS Project" \
   --iso-volume "KODI_OS"
 
-# Some older Ubuntu live-build releases regenerate the security variables
-# when lb build starts. Keep them explicitly disabled instead of deleting
-# them, otherwise the live-build defaults can turn security back on.
-for cfg in config/bootstrap config/common config/chroot; do
-  if [[ -f "$cfg" ]]; then
-    sed -i \
-      -e '/^LB_\(PARENT_\)\?MIRROR_\(CHROOT\|BINARY\)_SECURITY=/d' \
-      -e '/^LB_SECURITY=/d' \
-      -e '/bookworm\/updates/d' \
-      -e '/security\.debian\.org/d' \
-      -e '/deb\.debian\.org\/debian-security/d' \
-      -e '/bookworm-security/d' \
-      "$cfg"
-    cat >> "$cfg" <<'EOF'
-
-# Debian Bookworm security uses the bookworm-security suite. The old
-# live-build Ubuntu defaults use bookworm/updates, so do not generate a
-# security archive during the build.
-LB_SECURITY="false"
-LB_MIRROR_CHROOT_SECURITY=""
-LB_MIRROR_BINARY_SECURITY=""
-LB_PARENT_MIRROR_CHROOT_SECURITY=""
-LB_PARENT_MIRROR_BINARY_SECURITY=""
-EOF
-  fi
-done
-
-if grep -RqsE 'bookworm/updates|security\.debian\.org' config; then
-  echo "ERROR: obsolete Debian security repository remains in live-build config" >&2
-  grep -RnsE 'bookworm/updates|security\.debian\.org' config >&2 || true
-  exit 1
-fi
-
 mkdir -p \
   config/package-lists \
   config/includes.chroot/etc/systemd/system \
   config/includes.chroot/etc/default/grub.d \
-  config/includes.chroot/etc/apt/sources.list.d \
   config/includes.chroot/etc/calamares \
   config/includes.chroot/usr/sbin \
   config/includes.chroot/opt/kodi-os \
   config/includes.chroot/usr/share/kodi/addons \
   config/hooks/live
-
-cat > config/includes.chroot/etc/apt/sources.list.d/kodi-os-security.list <<'EOF'
-deb http://deb.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
-EOF
 
 cp "$OS_DIR/package-lists/kodi-os.list.chroot" config/package-lists/
 cp "$OS_DIR/systemd/kodi-os.target" config/includes.chroot/etc/systemd/system/
